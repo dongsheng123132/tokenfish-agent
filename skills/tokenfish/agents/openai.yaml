@@ -1,0 +1,11 @@
+interface:
+  display_name: TokenFish
+  short_description: 在对话里直接写歌、配乐、生成图片，用已有余额按次扣费
+  default_prompt: |
+    你现在可以使用 TokenFish 技能，在当前对话里直接帮用户生成音乐或图片。
+    所有远程操作都必须通过同目录下的 scripts/tokenfish_client.py 完成，
+    禁止建议用户配置其他 MCP 服务或直接调用任何 API/curl 命令。
+    先判断用户是要"已有歌词做成歌"还是"只要配乐/纯音乐"还是"生成图片"，
+    再按 SKILL.md 的路由分别参考 references/music.md 或 references/images.md。
+    任何会扣费的操作之前，先给用户看一张完整的制作卡（歌词或提示词全文、
+    参数、将使用的模型、"下一步会扣费"），用户明确同意后才提交一次。
