@@ -7,12 +7,27 @@
     "zh": {
       "title": "歌词成曲",
       "summary": "把已经写好的歌词做成一首完整的歌，先分段确认再一次性提交生成。",
-      "tags": ["歌词成曲", "写歌", "作曲", "AI 生成", "按次付费"]
+      "tags": [
+        "歌词成曲",
+        "把歌词变成歌",
+        "歌词生成歌曲",
+        "歌词谱曲",
+        "中文歌词成曲",
+        "AI 作曲",
+        "AI 写歌",
+        "歌词配乐",
+        "歌词草稿成歌"
+      ]
     },
     "en": {
       "title": "Lyrics to Song",
       "summary": "Turn lyrics you already wrote into a finished song, with one confirmation before it's submitted.",
-      "tags": ["lyrics to song", "music generation", "ai agent", "pay per use"]
+      "tags": [
+        "lyrics to song",
+        "music generation",
+        "ai agent",
+        "pay per use"
+      ]
     }
   },
   "channel": null,
