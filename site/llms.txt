@@ -1,0 +1,40 @@
+# TokenFish
+
+> TokenFish 让 AI 工具（豆包工作 / WorkBuddy / 千问 / Claude Code / Codex / Cursor）
+> 通过发一条消息就能调用写歌、作图能力。后端是虾盘云，按次扣费，不新建账号体系。
+
+## Start here
+
+- 安装（全能包）：先发这条消息给你的 AI —— 「安装 TokenFish，需要我操作时告诉我：https://tokenfish.cn/install.md」
+- 技能货架（查看全部可安装的包）：https://tokenfish.cn/skills/index.html
+- 首页：https://tokenfish.cn/index.html
+
+## 能力
+
+- 写歌：给一段歌词或一句想法，生成完整人声歌曲；只要配乐可生成纯伴奏。
+- 作图：按描述或参考图生成图片，可指定尺寸、数量、质量。
+- 即将上线：视频、配音。
+
+## 安装
+
+- 全能包：https://tokenfish.cn/skills/tokenfish/install.md
+- 歌词成曲（只做「把歌词做成歌」这一件事）：https://tokenfish.cn/skills/lyrics-to-song/install.md
+- 安装流程：下载 zip → 校验 SHA-256 → 安全解压（拒绝绝对路径 / `..` / 反斜杠 / 符号链接 /
+  非预期顶层目录）→ 放进宿主 AI 工具的 skills 目录 → 运行 `verify` 确认凭据。
+- 支持的宿主目录：Claude Code `~/.claude/skills/`、Codex `~/.codex/skills/`、
+  WorkBuddy `~/.workbuddy/skills/`、Cursor `~/.cursor/skills/`、豆包工作使用其自身技能目录。
+- 不提供、也不接受“下载脚本后直接管道执行”的一键安装方式；一律走上面的下载 + 校验 + 解压流程。
+
+## 计费
+
+- 后端账本：虾盘云。额度单位 quota，¥1 = 500000 quota。
+- 按次扣费，具体金额以钱包流水为准，本站不写死价格。
+- 没有凭据（key）时，AI 会提示获取一把 TokenFish / 虾盘云 key，写入本地凭据文件后运行
+  `login --key-file <path>`；之后无需每次重新登录。
+- 余额不足时，本次调用不扣费，充值后可用同一个 client_request_id 原样重试。
+
+## 开发者 API
+
+- 面向开发者的虾盘云 API 控制台：https://cloud.u-claw.org
+- 面向终端用户的 v0 控制台占位页（钱包 / 作品 / 已连接工具后续上线）：
+  https://tokenfish.cn/console.html

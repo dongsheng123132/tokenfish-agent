@@ -1,0 +1,10 @@
+{
+  "_placeholder": true,
+  "_note": "占位文件，由 build/build.py 生成后整体覆盖（build/ 由另一分支实现）。字段形状对齐 SPEC.md §5，真实值以 build.py 的输出为准。",
+  "package": "tokenfish",
+  "version": "0.0.0-placeholder",
+  "channel": "skillhub",
+  "locale": "zh-CN",
+  "archive": "/dist/tokenfish/skillhub/zh-CN/0.0.0-placeholder/tokenfish-0.0.0-placeholder.zip",
+  "archive_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}
