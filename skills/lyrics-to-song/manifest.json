@@ -1,0 +1,35 @@
+{
+  "name": "lyrics-to-song",
+  "version": "0.1.0",
+  "display_name": "歌词成曲",
+  "homepage": "https://tokenfish.cn/skills/lyrics-to-song",
+  "localized": {
+    "zh": {
+      "title": "歌词成曲",
+      "summary": "把已经写好的歌词做成一首完整的歌，先分段确认再一次性提交生成。",
+      "tags": [
+        "歌词成曲",
+        "把歌词变成歌",
+        "歌词生成歌曲",
+        "歌词谱曲",
+        "中文歌词成曲",
+        "AI 作曲",
+        "AI 写歌",
+        "歌词配乐",
+        "歌词草稿成歌"
+      ]
+    },
+    "en": {
+      "title": "Lyrics to Song",
+      "summary": "Turn lyrics you already wrote into a finished song, with one confirmation before it's submitted.",
+      "tags": [
+        "lyrics to song",
+        "music generation",
+        "ai agent",
+        "pay per use"
+      ]
+    }
+  },
+  "channel": null,
+  "locale": null
+}
