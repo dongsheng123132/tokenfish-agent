@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>歌词成曲 — TokenFish</title>
+<meta name="description" content="把一段歌词做成一首完整的歌，默认保留原词，一字不改。" />
+<link rel="stylesheet" href="../../assets/style.css" />
+</head>
+<body>
+<header class="tf-nav">
+  <div class="tf-nav-inner">
+    <a class="tf-logo" href="../../index.html">
+      <span class="tf-logo-mark">TF</span>
+      TokenFish
+    </a>
+    <nav class="tf-nav-links">
+      <a href="../index.html">技能货架</a>
+      <a href="../../llms.txt">llms.txt</a>
+      <a href="../../console.html">控制台</a>
+      <a href="https://cloud.u-claw.org">开发者 API（虾盘云）</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="tf-detail-head tf-shell">
+    <div class="tf-breadcrumb">
+      <a href="../../index.html">首页</a> / <a href="../index.html">技能货架</a> / 歌词成曲
+    </div>
+    <h1>歌词成曲</h1>
+    <p class="tf-lede">
+      只做一件事：把一段歌词做成一首完整的歌。默认保留你写的每一个字，只按段落加
+      <code>[Verse]</code> / <code>[Chorus]</code> / <code>[Bridge]</code> 标签；
+      明确授权改写时才会调整歌词。
+    </p>
+    <div class="tf-cta-row" style="justify-content:flex-start;">
+      <button
+        type="button"
+        class="tf-btn tf-btn-primary"
+        data-copy-text="安装 TokenFish 歌词成曲，需要我操作时告诉我：https://tokenfish.cn/skills/lyrics-to-song/install.md"
+      >
+        复制安装消息
+      </button>
+    </div>
+  </section>
+
+  <section class="tf-shell">
+    <div class="tf-panel">
+      <h2>示例</h2>
+      <p class="tf-example">
+        「这是我写的一段歌词，帮我做成一首歌，不要改我的字」<br />
+        「风格要抒情一点，副歌部分再突出一些」
+      </p>
+      <p class="tf-price-note">按次扣费，以钱包流水为准；生成前会先给你一张制作卡（完整歌词、标题、风格、模型），确认后才提交。</p>
+    </div>
+
+    <div class="tf-panel">
+      <h2>流程</h2>
+      <ol class="tf-list">
+        <li>把歌词发给 AI，AI 先整理段落结构（免费）。</li>
+        <li>AI 给出制作卡：完整歌词、标题、风格、使用的模型、即将扣费的提示。</li>
+        <li>你确认后，AI 只提交一次；生成中会轮询进度。</li>
+        <li>完成后按顺序给出每段试听链接和时长。</li>
+      </ol>
+    </div>
+
+    <div class="tf-panel">
+      <h2>安装到哪些工具</h2>
+      <ul class="tf-list">
+        <li>Claude Code：<code>~/.claude/skills/</code></li>
+        <li>Codex：<code>~/.codex/skills/</code></li>
+        <li>WorkBuddy：<code>~/.workbuddy/skills/</code></li>
+        <li>Cursor：<code>~/.cursor/skills/</code></li>
+        <li>豆包工作：其技能目录（由 AI 按环境自行定位）</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer class="tf-footer tf-shell">
+  <div class="tf-footer-links">
+    <a href="../../index.html">首页</a>
+    <a href="../index.html">技能货架</a>
+    <a href="install.md">install.md</a>
+    <a href="https://cloud.u-claw.org">开发者 API（虾盘云）</a>
+  </div>
+  <p>TokenFish 由虾盘云提供底层算力与计费。</p>
+</footer>
+
+<script src="../../assets/copy.js"></script>
+</body>
+</html>

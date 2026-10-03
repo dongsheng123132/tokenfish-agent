@@ -1,0 +1,10 @@
+{
+  "_placeholder": true,
+  "_note": "占位文件，由 build/build.py 生成后整体覆盖（build/ 由另一分支实现）。字段形状对齐 SPEC.md §5，真实值以 build.py 的输出为准。",
+  "package": "lyrics-to-song",
+  "version": "0.0.0-placeholder",
+  "channel": "skillhub",
+  "locale": "zh-CN",
+  "archive": "/dist/lyrics-to-song/skillhub/zh-CN/0.0.0-placeholder/lyrics-to-song-0.0.0-placeholder.zip",
+  "archive_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}
