@@ -1003,7 +1003,7 @@ class TestStaticPages(unittest.TestCase):
 
     def test_P3_page_copy_matches_the_agreed_wording(self):
         play = self.read("site/play.html") + self.read("site/assets/play.js")
-        for text in ("再做一首", "虾盘云官网", "充值 10 元", "约 24 小时内有效", "链接无效"):
+        for text in ("再做一首", "虾盘云官网", "充值 10 元", "最短约 12 小时就会失效", "链接无效"):
             self.assertIn(text, play)
         pay = self.read("site/pay.html") + self.read("site/assets/pay.js")
         for text in ("付款后回到 AI 对话说『好了』，AI 会帮你查到账", "虾盘云官网", "weixin://", "链接无效"):
@@ -1025,12 +1025,12 @@ class TestStaticPages(unittest.TestCase):
 
     def test_P6_versions_are_0_2_0_and_site_origin_is_the_launch_origin(self):
         tf = import_client_module()
-        self.assertEqual(tf.CLIENT_VERSION, "0.2.0")
+        self.assertEqual(tf.CLIENT_VERSION, "0.2.1")
         self.assertEqual(tf.SITE_ORIGIN, SITE)
         self.assertEqual(tf.OFFICIAL_SITE_URL, OFFICIAL)
         for slug in ("tokenfish", "lyrics-to-song"):
             manifest = json.loads(self.read(f"skills/{slug}/manifest.json"))
-            self.assertEqual(manifest["version"], "0.2.0")
+            self.assertEqual(manifest["version"], "0.2.1")
 
     def test_P7_skill_docs_and_install_template_use_setup_and_keep_login_as_the_import_path(self):
         for rel in (
