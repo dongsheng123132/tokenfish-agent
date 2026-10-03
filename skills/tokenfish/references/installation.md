@@ -16,6 +16,7 @@ python scripts/tokenfish_client.py topup            # 打开充值页并把 key 
 
 - 优先读 `~/.tokenfish/credentials.json`。
 - 如果这个文件不存在，会**只读**尝试 `~/.uking/device.json`（U-King 用户共用同一个钱包），不会写入这个文件。
+- 沙箱里 home 目录不可写时：让用户把环境变量 `TOKENFISH_HOME` 设为一个可写目录（任务记录和 `login` 的凭据都放那里；`whoami` 会显示实际用的 `state_dir`）。
 - 如果两个都没有，任何调用都会返回 `not_logged_in` 错误。这种情况下，让用户准备好一个包含 key 的文本文件，然后运行：
 
 ```bash

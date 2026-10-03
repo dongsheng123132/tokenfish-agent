@@ -15,7 +15,7 @@
 1. 和用户把描述确认清楚（主体、风格、构图、张数、用途），必要时建议合适的 `size`。
 2. 出制作卡：最终提示词全文、张数、尺寸、画质、"下一步会扣费"。
 3. 用户确认后生成 `client_request_id`，调用一次 `tokenfish.images.generate`。
-4. 图片生成是同步的，返回即是终态：按 `images` 顺序展示每张图的本地路径（在 `./tokenfish-outputs/` 下）或 URL。
+4. 图片生成是同步的，返回即是终态：按 `images` 顺序展示每张图的本地路径或 URL。图片文件存到第一个可写的目录：`TOKENFISH_OUTPUT_DIR`（若设置）→ `./tokenfish-outputs/` → `<state_dir>/outputs`；如果返回里带 `warning`（文件没能保存），原样转述，以 URL 为准，不要重试。
 5. 报告 `charged_cny`（没有就说"以钱包流水为准"），不要按张数自己估算价格。
 
 模型固定为 `gpt-image-2`（客户端已内置，不需要用户选择）。

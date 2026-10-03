@@ -26,6 +26,8 @@ python client/tokenfish_client.py topup                     # 打开充值页并
 
 凭据来源：`~/.tokenfish/credentials.json`，不存在时只读回退到 `~/.uking/device.json`（U-King 用户共用同一个钱包）。key 永远不出现在 stdout/stderr/日志/命令参数/环境变量里。
 
+状态目录（任务记录 `tasks.json`，以及 home 不可写时 `login` 存的凭据）取第一个可写的：`$TOKENFISH_HOME` → `~/.tokenfish` → `<临时目录>/tokenfish-<用户名>` → `<cwd>/.tokenfish`。沙箱化的宿主里 home 常常不可写，建议把 `TOKENFISH_HOME` 设为一个可写目录（`whoami` 会显示实际用的 `state_dir`）；作图文件目录可用 `TOKENFISH_OUTPUT_DIR` 指定。
+
 ## 打包
 
 ```bash

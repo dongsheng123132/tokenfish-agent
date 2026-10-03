@@ -16,7 +16,9 @@
 | `insufficient_balance` | 余额不足，本次未扣费 | 原样转述 `message`；告诉用户可以运行 `topup` 充值，充值后用同一个 `client_request_id` 重试 |
 | `auth_invalid` | 凭据无效 | 引导用户重新 `login --key-file <path>` |
 | `rate_limited` | 触发限流，可重试 | 稍等一下用同一个 `client_request_id` 重试 |
-| `transient` | 上游/网络暂时不可用，可重试 | 用同一个 `client_request_id` 原样重试 |
+| `transient` | 上游/网络暂时不可用，已确认没有扣费（或服务端幂等），可重试 | 用同一个 `client_request_id` 原样重试 |
+| `outcome_unknown` | 请求可能已经提交并扣费，结果无法确认，**不可重试** | **绝对不要重试**（同一个或新的 `client_request_id` 都不行）；告诉用户可能已扣费，调用 `tokenfish.wallet.get` 展示余额，建议用户查看钱包流水核对 |
+| `local_state_unwritable` | 本地状态目录不可写，本次未提交、未扣费 | 让用户把环境变量 `TOKENFISH_HOME` 设为一个可写目录后再试 |
 | `invalid_arguments` | 参数不对 | 按 `message` 里指出的字段修正后再试 |
 | `idempotency_conflict` | 同一个 `client_request_id` 之前提交过不同的参数 | 换一个新的 `client_request_id` 重新走一遍制作卡流程 |
 

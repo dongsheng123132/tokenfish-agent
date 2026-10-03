@@ -125,3 +125,21 @@ stdout 输出 `{"error":{"code":..., "message":中文, "retryable":bool, "next_a
 - `tokenfish.cn` 备案完成后可切为主域。届时旧二级域名 `tokenfish.u-claw.org.cn` **必须保持 301 跳转到新域名、不能下线**：已安装到用户机器上的 Skill 里（`manifest.json` 的 `homepage`、`install.md` 的链接等）写着旧地址，下线会让这些存量安装失效。
 - 站点 origin 只应出现在 `site/` 与各 `skills/*/manifest.json` 的 `homepage` 中，换域名时按 `git grep -n "tokenfish\.u-claw\.org\.cn"` 全量替换；`scripts/check_links.py` 会拦截 `site/` 下残留的裸 `tokenfish.cn` 主机名（防止只迁一半）。
 - 充值链接（`client/tokenfish_client.py` 的 `TOPUP_URL`，上文 `topup` 命令处写的 `https://api.u-claw.org/recharge`）改用 `https://api.u-claw.org.cn/recharge`（同一页面；`u-claw.org` 无 ICP 备案）。
+
+## 附：防重复扣费（2026-10-03）
+
+- 事故：沙箱 AI 工具里 home 不可写。`tokenfish.music.generate` 已把请求提交给 Suno 并被服务端扣费，随后写 `~/.tokenfish/tasks.json` 抛 `PermissionError`，落入兜底 `except` 被报成可重试的 `transient`；AI 用同一 `client_request_id` 重试，本地没有记录、Suno 又没有服务端幂等，于是**重复提交、重复扣费**。Suno 路径的服务端去重属后端 TODO，不在本仓范围；本仓只在客户端兜底。
+- 原则：**任何可能已经扣费的情况，都不得报成 retryable。**
+- 状态目录 `state_dir()`：依次取 `$TOKENFISH_HOME` → `~/.tokenfish` → `<系统临时目录>/tokenfish-<用户名>` → `<cwd>/.tokenfish`，第一个能创建且能写入（创建并删除临时文件探测）的；进程内缓存；POSIX 下临时目录那一项必须归当前用户所有；`whoami` 输出 `state_dir`。临时目录排在 cwd 之前，是因为它在任何工作目录下都是同一个，AI 工具中途换 cwd 也能找回记录。`tasks.json` 的**写入**放这里；`login` 在 `~/.tokenfish` 不可写时存到这里，`load_credentials` 也会读这里（仍先读 `~/.tokenfish`，再读 `~/.uking/device.json`）。**查找**记录（`find_record_by_*`、`tasks.list`）读取每个候选目录里存在且可读的 `tasks.json` 的并集（只读，读的时候不创建任何目录）；同一 `client_request_id` 出现在多处时，`submitted` 记录优先于 `unknown`/`submitting`，再取 `created_at` 最新的。作图输出目录：`$TOKENFISH_OUTPUT_DIR` → `./tokenfish-outputs` → `<state_dir>/outputs`，第一个可写的。
+- 先写后发（write-ahead）：付费提交（音乐、作图）的 HTTP POST 之前，先写 `{client_request_id, args_hash, status:"submitting", provider, created_at}`。没有任何可写状态目录 → `local_state_unwritable`（不可重试，退出码 3，未提交未扣费，提示设置 `TOKENFISH_HOME`）。
+- 失败三分类（`http_request`）：服务端回了错误状态 → `ApiHttpError`（视为未扣费，网关会退款，删除记录，按原规则归一，可重试/可回退）；确定没发出（连接被拒、DNS 失败；以及仅当它们作为 `URLError.reason`（即连接/发送阶段、尚无响应）出现时的：沙箱拒绝连接的 `PermissionError`、`ENETUNREACH`/`EHOSTUNREACH`/`ECONNREFUSED`、`ssl.SSLCertVerificationError`）→ `ApiTransientError(maybe_sent=False)`（删除记录，可重试）；可能已发出（超时、连接重置、对端断开、管道断裂等）→ `ApiTransientError(maybe_sent=True)`；2xx 但响应体读不出 → `ApiBadResponse`。后两者保留记录为 `unknown` 并报 `outcome_unknown`（不可重试，退出码 3，提示先查余额和流水，不要用同一个或新的 `client_request_id` 重试）。例外：MiniMax 带服务端 `idempotency_key`，可能已发出的网络类失败**以及 2xx 但响应体不可读**都仍是可重试的 `transient`（重试重放同一幂等键），记录保留为 `provider: minimax`、`status: unknown`。
+- `auto` 模式只在 Suno 返回服务端错误状态（非 402/余额不足）或确定未发出时才回退 MiniMax；可能已发出或响应体不可读时报 `outcome_unknown`，绝不回退。
+- 提交成功后把记录更新为 `submitted` 并写入 `task_id`。更新记录失败或图片文件写不进去时**不抛错**，照常返回结果并附中文 `warning`（已提交、可能已扣费、请勿重试）。
+- 同一 `client_request_id` 再次到来：记录为 `submitted` 且有 `task_id` → 刷新并返回，不重提；记录为 `submitting`/`unknown`（没有 `task_id`）且参数相同 → `outcome_unknown`，不重提（provider 为 minimax 例外：可用同一幂等键重提，且直接走 MiniMax，不再先试 Suno）；参数不同 → `idempotency_conflict`。
+- `tokenfish.tasks.get` 额外接受可选 `provider`（`suno`|`minimax`）：本地没有该 `task_id` 的记录时（例如提交成功后写记录失败），直接按该 provider 的状态端点查询；有本地记录时以记录为准。该次返回的 `warning` 只在已知 `task_id` 时才提示用 `task_id`+`provider` 调 `tasks.get`；`outcome_unknown` 时没有 `task_id`，不提示。
+- 工具运行器兜底：付费工具（`music.generate`、`images.generate`）出现未预期异常 → `outcome_unknown`（不可重试，退出码 3）；只读工具仍是 `transient`。
+- 新增错误码：`outcome_unknown`、`local_state_unwritable`（均不可重试，退出码 3）。上文 §2.5 的"5xx/超时/网络 → `transient`，可原样重试"现在仅适用于确认没扣费的情况；付费提交遇到可能已发出的失败一律改报 `outcome_unknown`。
+- 已知局限（本轮不处理）：`tasks.json` 读-改-写没有加锁，两个进程并发写可能丢记录；`tasks.json` 损坏时按空表处理，下次写入会覆盖。
+- 已知局限：凭据查找顺序是 `~/.tokenfish` 先于状态目录；若 home 里有旧 key 但不可写，新 `login` 存到状态目录后仍会被旧 key 遮住（`login` 输出 `saved_to` 便于察觉）。
+- 已知局限（对后端的两个假设）：「服务端回了错误状态 = 未扣费」依赖网关退款，若某个 5xx 发生在上游已扣费之后会被当作可重试；作图按"无服务端幂等"处理，所有可能已发出的失败一律 `outcome_unknown`，若后端确认作图接口幂等可放宽。
+- 已知局限：若 home 与临时目录都不可写、只剩 `<cwd>/.tokenfish`，记录与 cwd 绑定，换 cwd 后找不到（极端情形，客户端无从兜底）。
