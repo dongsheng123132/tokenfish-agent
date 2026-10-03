@@ -118,3 +118,10 @@ stdout 输出 `{"error":{"code":..., "message":中文, "retryable":bool, "next_a
 2. `python build/build.py` 两次输出的 sha256 一致；解压后结构正确。
 3. 站点所有相对链接在 `python -m http.server -d site` 下可达（写个小脚本检查）。
 4. 全仓 `grep -ri "suno\|minimax"` 只允许出现在 client 的实现代码、tests 和 references 的"上游说明"里，不得出现在任何 slug、title、description、站点标题里。
+
+## 附：站点域名决定（2026-09-30）
+
+- 站点首发 origin 为 `https://tokenfish.u-claw.org.cn`。原因：`u-claw.org.cn` 已 ICP 备案；`tokenfish.cn` 未备案、暂无解析，无法作为首发域名。上文出现的 `https://tokenfish.cn/...` 均为原始设计稿的写法，实际发布一律以本附录为准。
+- `tokenfish.cn` 备案完成后可切为主域。届时旧二级域名 `tokenfish.u-claw.org.cn` **必须保持 301 跳转到新域名、不能下线**：已安装到用户机器上的 Skill 里（`manifest.json` 的 `homepage`、`install.md` 的链接等）写着旧地址，下线会让这些存量安装失效。
+- 站点 origin 只应出现在 `site/` 与各 `skills/*/manifest.json` 的 `homepage` 中，换域名时按 `git grep -n "tokenfish\.u-claw\.org\.cn"` 全量替换；`scripts/check_links.py` 会拦截 `site/` 下残留的裸 `tokenfish.cn` 主机名（防止只迁一半）。
+- 充值链接（`client/tokenfish_client.py` 的 `TOPUP_URL`，上文 `topup` 命令处写的 `https://api.u-claw.org/recharge`）改用 `https://api.u-claw.org.cn/recharge`（同一页面；`u-claw.org` 无 ICP 备案）。

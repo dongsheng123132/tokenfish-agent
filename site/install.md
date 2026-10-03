@@ -1,7 +1,7 @@
 <!--
   占位文件 — 由 build/build.py 生成后会整体覆盖本文件（另一分支正在实现 build/）。
   本文件只是让 index.html 里「复制这条消息」按钮引用的
-  https://tokenfish.cn/install.md 现在就能打开、结构先对齐 SPEC.md §4/§5。
+  https://tokenfish.u-claw.org.cn/install.md 现在就能打开、结构先对齐 SPEC.md §4/§5。
   真实版本会由 build/templates/install.md.tmpl 渲染，包含真实的
   zip 下载地址、SHA-256、版本号。这里默认对应「TokenFish 全能包」
   （skills/tokenfish/），因为首页的安装消息未指定具体子包。

@@ -23,6 +23,12 @@ inside those:
      whitespace, match `^/dist/\\S+\\.zip$`, and GETs each, requiring
      HTTP 200.
 
+Finally, it guards against half-migrated origins: every text file under
+site/ (*.html, *.md, *.txt, *.json) is scanned for the bare host
+`tokenfish.cn` (regex `(?<![\\w.-])tokenfish\\.cn(?![\\w-])`, so the launch
+origin `tokenfish.u-claw.org.cn` does NOT match). Each hit is reported as
+`FAIL  <file>:<line> -> stale origin tokenfish.cn` and counted in failures.
+
 This script only reports results; it does not decide "the site is done".
 """
 
@@ -89,6 +95,26 @@ def find_zip_lines(md_path: str) -> list[str]:
     return [line.strip() for line in lines if ZIP_LINE_RE.match(line.strip())]
 
 
+STALE_ORIGIN_RE = re.compile(r"(?<![\w.-])tokenfish\.cn(?![\w-])")
+TEXT_SUFFIXES = (".html", ".md", ".txt", ".json")
+
+
+def find_text_files(root: str) -> list[str]:
+    """All *.html / *.md / *.txt / *.json files under `root` (recursive)."""
+    out = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            if name.endswith(TEXT_SUFFIXES):
+                out.append(os.path.join(dirpath, name))
+    return sorted(out)
+
+
+def find_stale_origin_lines(path: str) -> list[int]:
+    """1-based line numbers where the bare host `tokenfish.cn` is used."""
+    with open(path, "r", encoding="utf-8") as f:
+        return [n for n, line in enumerate(f, start=1) if STALE_ORIGIN_RE.search(line)]
+
+
 def extract_links(html_path: str) -> list[str]:
     with open(html_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -150,7 +176,7 @@ def wait_for_server(port: int, timeout: float = 5.0) -> None:
         try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
             conn.request("GET", "/")
-            conn.getresponse()
+            conn.getresponse().read()
             conn.close()
             return
         except (ConnectionRefusedError, OSError):
@@ -259,12 +285,21 @@ def main() -> int:
                 else:
                     print(f"OK    {rel_md} -> {zip_path}: HTTP {status}")
 
+        text_files = find_text_files(SITE_DIR)
+        for text_path in text_files:
+            rel_text = os.path.relpath(text_path, SITE_DIR).replace(os.sep, "/")
+            for lineno in find_stale_origin_lines(text_path):
+                print(f"FAIL  {rel_text}:{lineno} -> stale origin tokenfish.cn")
+                failures.append((f"{rel_text}:{lineno}", "tokenfish.cn", None, "stale origin tokenfish.cn"))
+
         print()
         print(f"Checked {total} relative link(s) across {len(html_files)} page(s).")
+        print(f"Scanned {len(text_files)} text file(s) for stale origin tokenfish.cn.")
         if failures:
-            print(f"RESULT: {len(failures)} broken link(s) found.")
+            print(f"RESULT: {len(failures)} failure(s) found (broken link / stale origin).")
             for rel_page, link, url_path, reason in failures:
-                print(f"  - {rel_page} -> {link} (resolved {url_path}): {reason}")
+                resolved = f" (resolved {url_path})" if url_path else ""
+                print(f"  - {rel_page} -> {link}{resolved}: {reason}")
             return 1
         print("RESULT: all relative links resolved.")
         return 0

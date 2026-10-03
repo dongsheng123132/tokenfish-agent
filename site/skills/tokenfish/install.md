@@ -1,7 +1,7 @@
 <!--
   占位文件 — 由 build/build.py 用 build/templates/install.md.tmpl 生成后会整体覆盖本文件
   （build/ 由另一分支实现）。这里先让 skills/tokenfish/index.html 里的
-  「复制安装消息」按钮引用的 https://tokenfish.cn/skills/tokenfish/install.md 能打开，
+  「复制安装消息」按钮引用的 https://tokenfish.u-claw.org.cn/skills/tokenfish/install.md 能打开，
   结构对齐 SPEC.md §4/§5。内容与站点根目录的 install.md 一致（同一个全能包）。
 -->
 

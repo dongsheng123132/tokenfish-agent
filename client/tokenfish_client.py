@@ -42,7 +42,7 @@ from typing import Any, Optional
 CLIENT_VERSION = "0.1.0"
 
 DEFAULT_API_BASE = "https://api.u-claw.org.cn"
-TOPUP_URL = "https://api.u-claw.org/recharge"
+TOPUP_URL = "https://api.u-claw.org.cn/recharge"
 
 QUOTA_PER_CNY = 500000
 

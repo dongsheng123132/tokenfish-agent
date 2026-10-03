@@ -5,9 +5,9 @@
 
 ## Start here
 
-- 安装（全能包）：先发这条消息给你的 AI —— 「安装 TokenFish，需要我操作时告诉我：https://tokenfish.cn/install.md」
-- 技能货架（查看全部可安装的包）：https://tokenfish.cn/skills/index.html
-- 首页：https://tokenfish.cn/index.html
+- 安装（全能包）：先发这条消息给你的 AI —— 「安装 TokenFish，需要我操作时告诉我：https://tokenfish.u-claw.org.cn/install.md」
+- 技能货架（查看全部可安装的包）：https://tokenfish.u-claw.org.cn/skills/index.html
+- 首页：https://tokenfish.u-claw.org.cn/index.html
 
 ## 能力
 
@@ -17,8 +17,8 @@
 
 ## 安装
 
-- 全能包：https://tokenfish.cn/skills/tokenfish/install.md
-- 歌词成曲（只做「把歌词做成歌」这一件事）：https://tokenfish.cn/skills/lyrics-to-song/install.md
+- 全能包：https://tokenfish.u-claw.org.cn/skills/tokenfish/install.md
+- 歌词成曲（只做「把歌词做成歌」这一件事）：https://tokenfish.u-claw.org.cn/skills/lyrics-to-song/install.md
 - 安装流程：下载 zip → 校验 SHA-256 → 安全解压（拒绝绝对路径 / `..` / 反斜杠 / 符号链接 /
   非预期顶层目录）→ 放进宿主 AI 工具的 skills 目录 → 运行 `verify` 确认凭据。
 - 支持的宿主目录：Claude Code `~/.claude/skills/`、Codex `~/.codex/skills/`、
@@ -37,4 +37,4 @@
 
 - 面向开发者的虾盘云 API 控制台：https://cloud.u-claw.org
 - 面向终端用户的 v0 控制台占位页（钱包 / 作品 / 已连接工具后续上线）：
-  https://tokenfish.cn/console.html
+  https://tokenfish.u-claw.org.cn/console.html
