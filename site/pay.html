@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<meta name="robots" content="noindex" />
+<title>微信付款 — TokenFish</title>
+<meta name="description" content="TokenFish 微信充值付款页：扫码付款，付完回到 AI 对话查到账。" />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="tf-nav">
+  <div class="tf-nav-inner">
+    <a class="tf-logo" href="index.html">
+      <span class="tf-logo-mark">TF</span>
+      TokenFish
+    </a>
+    <nav class="tf-nav-links">
+      <a href="skills/index.html">技能货架</a>
+      <a href="llms.txt">llms.txt</a>
+      <a href="console.html">控制台</a>
+      <a href="https://cloud.u-claw.org">开发者 API（虾盘云）</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="tf-play tf-shell">
+    <div class="tf-panel">
+      <h1 class="tf-play-title">微信付款</h1>
+      <p class="tf-play-message" id="pay-message" hidden></p>
+      <div id="pay-body" hidden>
+        <p class="tf-amount" id="pay-amount"></p>
+        <p class="tf-kv">订单号：<strong id="pay-order"></strong></p>
+        <div class="tf-qr" id="pay-qr"></div>
+        <p class="tf-kv">用手机微信「扫一扫」付款。如果你就在手机上打开本页，请长按二维码，选「识别图中二维码」。</p>
+        <p class="tf-price-note">付款后回到 AI 对话说『好了』，AI 会帮你查到账。</p>
+      </div>
+    </div>
+
+    <div class="tf-cta-row">
+      <a class="tf-btn tf-btn-secondary" href="https://www.u-claw.org.cn">虾盘云官网</a>
+      <a class="tf-btn tf-btn-secondary" href="index.html">TokenFish 首页</a>
+    </div>
+  </section>
+</main>
+
+<footer class="tf-footer tf-shell">
+  <div class="tf-footer-links">
+    <a href="index.html">首页</a>
+    <a href="skills/index.html">技能货架</a>
+    <a href="llms.txt">llms.txt</a>
+    <a href="https://www.u-claw.org.cn">虾盘云官网</a>
+  </div>
+  <p>TokenFish 由虾盘云提供底层算力与计费。</p>
+</footer>
+
+<script src="assets/qrcode.js"></script>
+<script src="assets/pay.js"></script>
+</body>
+</html>

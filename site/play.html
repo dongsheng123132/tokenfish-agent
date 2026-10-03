@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<meta name="robots" content="noindex" />
+<title>作品 — TokenFish</title>
+<meta name="description" content="TokenFish 作品页：试听或查看你刚生成的歌曲 / 图片，并下载保存。" />
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<header class="tf-nav">
+  <div class="tf-nav-inner">
+    <a class="tf-logo" href="index.html">
+      <span class="tf-logo-mark">TF</span>
+      TokenFish
+    </a>
+    <nav class="tf-nav-links">
+      <a href="skills/index.html">技能货架</a>
+      <a href="llms.txt">llms.txt</a>
+      <a href="console.html">控制台</a>
+      <a href="https://cloud.u-claw.org">开发者 API（虾盘云）</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="tf-play tf-shell">
+    <div class="tf-panel">
+      <h1 class="tf-play-title" id="play-title">你的作品</h1>
+      <p class="tf-hint" id="play-meta" hidden></p>
+      <div class="tf-play-media" id="play-media"></div>
+      <p class="tf-play-message" id="play-message" hidden></p>
+      <p class="tf-price-note" id="play-expiry" hidden>这是临时链接，约 24 小时内有效，请及时下载。</p>
+    </div>
+
+    <div class="tf-panel">
+      <h2>需要充值？</h2>
+      <p class="tf-kv">回到 AI 对话说「充值 10 元」即可拿到付款链接（金额可以自己定，1 到 500 元）。</p>
+    </div>
+
+    <div class="tf-cta-row">
+      <a class="tf-btn tf-btn-primary" id="play-again" href="index.html">再做一首</a>
+      <a class="tf-btn tf-btn-secondary" href="https://www.u-claw.org.cn">虾盘云官网</a>
+    </div>
+  </section>
+</main>
+
+<footer class="tf-footer tf-shell">
+  <div class="tf-footer-links">
+    <a href="index.html">首页</a>
+    <a href="skills/index.html">技能货架</a>
+    <a href="llms.txt">llms.txt</a>
+    <a href="https://www.u-claw.org.cn">虾盘云官网</a>
+  </div>
+  <p>TokenFish 由虾盘云提供底层算力与计费。</p>
+</footer>
+
+<script src="assets/play.js"></script>
+</body>
+</html>

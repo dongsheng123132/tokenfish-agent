@@ -18,7 +18,7 @@
 2. 用整理后的歌词和用户描述的风格，出一张制作卡：完整歌词（含段落标签）、标题、风格描述、`model`（默认 auto）、"下一步会扣费"。
 3. 用户确认后，生成 `client_request_id`，调用 `tokenfish.music.generate`（`lyrics` 填整理后的歌词）。
 4. 结果如果不是终态（`status` 为 `queued`/`running`），用 `tokenfish.tasks.get` 轮询直到 `succeeded` 或 `failed`；轮询间隔给用户一个大概等待的心理预期（上游生成一般要 1-2 分钟到几分钟不等），不要死循环刷屏。
-5. 交付：按 `clips` 顺序列出每首的 `audio_url`、`duration_seconds`；报告 `charged_cny`（没有就说"以钱包流水为准"）。
+5. 交付：按 `clips` 顺序列出每首的 `play_url`（作品页，可在线试听和下载）、`audio_url`、`duration_seconds`；并**原样**给出 `links.site`、`charged_cny`（没有就说"以钱包流水为准"）、`balance_after_cny` 和 `topup_hint`（有就原样给）。`play_url` 是临时链接，约 24 小时内有效，提醒用户及时下载。
 
 ## 纯音乐 / 配乐（最短路径）
 

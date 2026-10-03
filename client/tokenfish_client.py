@@ -25,6 +25,16 @@ Design constraints (see SPEC.md, authoritative):
     tasks.json so a record is found whatever the cwd; image output dir is $TOKENFISH_OUTPUT_DIR ->
     ./tokenfish-outputs -> <state_dir>/outputs, first writable.
 
+v0.2: `setup` opens a new, empty wallet when no credentials exist anywhere
+(POST /device/bind, no registration); the tools `tokenfish.wallet.topup` /
+`tokenfish.wallet.topup_status` create / check a recharge order (the key only
+ever travels in the POST body of /recharge/create, never in a URL or in any
+output); and every successful paid result is decorated by the client itself
+with `play_url`s (a static page on SITE_ORIGIN, data in the URL fragment),
+`links`, `balance_after_cny` and `topup_hint`. The decoration happens after the
+result is final and swallows every failure, so it can never change a charge
+decision.
+
 This module is designed to be copied into `scripts/tokenfish_client.py`
 inside a Skill package by build/build.py. When run standalone (e.g. from
 client/ for testing) it still works; package_slug attribution falls back to
@@ -51,19 +61,27 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
-CLIENT_VERSION = "0.1.1"
+CLIENT_VERSION = "0.2.0"
 
 DEFAULT_API_BASE = "https://api.u-claw.org.cn"
 TOPUP_URL = "https://api.u-claw.org.cn/recharge"
+
+# Origin of the static site (play.html / pay.html). Data for those pages rides
+# in the URL fragment, which browsers never send to the server. Keep in sync with
+# the SPEC.md "站点域名决定" appendix.
+SITE_ORIGIN = "https://tokenfish.u-claw.org.cn"
+OFFICIAL_SITE_URL = "https://www.u-claw.org.cn"
 
 QUOTA_PER_CNY = 500000
 
 DEFAULT_TIMEOUT = 30
 MINIMAX_TIMEOUT = 240
+WALLET_FETCH_TIMEOUT = 8  # best-effort balance lookups after a result is final
 
 HOME_STATE_DIR = Path.home() / ".tokenfish"
 CREDENTIALS_PATH = HOME_STATE_DIR / "credentials.json"
@@ -78,6 +96,9 @@ MUSIC_MODELS = ("auto", "suno", "minimax")
 TASK_PROVIDERS = ("suno", "minimax")
 IMAGE_QUALITIES = ("low", "medium", "high", "auto")
 CAPABILITIES = ("text_to_music", "text_to_image")
+TOPUP_CHANNELS = ("alipay", "wechat")
+TOPUP_AMOUNT_MIN = 1
+TOPUP_AMOUNT_MAX = 500
 
 
 # --------------------------------------------------------------------------
@@ -110,9 +131,11 @@ class ToolError(Exception):
 def err_not_logged_in() -> ToolError:
     return ToolError(
         "not_logged_in",
-        "未找到凭据。请先运行 `login --key-file <path>` 完成登录。",
+        "未找到凭据。可以免注册开一个新的 TokenFish 钱包（`setup`），或用 `login --key-file <path>` 导入已有的 key。",
         False,
-        "运行 `python tokenfish_client.py login --key-file <path>` 完成登录",
+        "先告诉用户：可以免注册开一个新钱包（新钱包余额为 0，需要先充值），征得同意后运行 "
+        "`python tokenfish_client.py setup`；如果用户已有 key，改为让用户把 key 存到文件后运行 "
+        "`python tokenfish_client.py login --key-file <path>` 导入",
         3,
     )
 
@@ -120,9 +143,12 @@ def err_not_logged_in() -> ToolError:
 def err_insufficient_balance() -> ToolError:
     return ToolError(
         "insufficient_balance",
-        "余额不足，本次未扣费。请运行 topup 充值，充值后可用同一 client_request_id 原样重试。",
+        "余额不足，本次未扣费。请告诉用户余额不足，问清要充多少元（1 到 500 的整数）、用支付宝还是微信；"
+        "然后调用 tokenfish.wallet.topup 拿付款链接给用户，用户付款后调用 tokenfish.wallet.topup_status 确认到账，"
+        "再用同一个 client_request_id 原样重试。",
         False,
-        "运行 `python tokenfish_client.py topup` 充值后，用同一 client_request_id 重试",
+        "问用户充多少元（1-500 的整数）和支付宝/微信 → 调用 tokenfish.wallet.topup → 把 pay_link 原样给用户 → "
+        "用户付款后调用 tokenfish.wallet.topup_status → 到账后用同一个 client_request_id 重试",
         3,
     )
 
@@ -202,6 +228,79 @@ def err_local_state_unwritable(for_login: bool = False) -> ToolError:
         )
         action = "设置环境变量 TOKENFISH_HOME 为一个可写目录后，用同一个 client_request_id 重新调用"
     return ToolError("local_state_unwritable", msg, False, action, 3)
+
+
+def err_transient_free(detail: str = "") -> ToolError:
+    """Transient failure of a call that never charges (setup / top-up tools):
+    retrying is always safe, and there is no client_request_id to reuse."""
+    msg = "服务暂时不可用" + (f"：{detail}" if detail else "") + "。本次没有产生任何扣费，可以稍后重试。"
+    return ToolError("transient", msg, True, "稍后重新调用本工具", 4)
+
+
+def err_rate_limited_free() -> ToolError:
+    return ToolError("rate_limited", "请求过于频繁，请稍后重试。", True, "稍等片刻后重新调用本工具", 4)
+
+
+def err_setup_rate_limited() -> ToolError:
+    return ToolError(
+        "rate_limited",
+        "开钱包的请求过于频繁（同一网络出口的开通次数有上限），本次没有创建任何钱包。请稍后再试。",
+        True,
+        "稍等几分钟后重新运行 `python tokenfish_client.py setup`",
+        4,
+    )
+
+
+def err_setup_transient(detail: str = "") -> ToolError:
+    msg = (
+        "开钱包没有成功" + (f"（{detail}）" if detail else "") + "。重试是安全的："
+        "即使服务端已经建好了一个新钱包，它也只是余额为 0 的空钱包，不涉及任何资金。"
+    )
+    return ToolError("transient", msg, True, "重新运行 `python tokenfish_client.py setup`", 4)
+
+
+def err_setup_unwritable(wallet_created: bool) -> ToolError:
+    if wallet_created:
+        msg = (
+            "钱包可能已经创建，但它的 key 没能保存到本机（状态目录不可写），这个钱包已无法找回。"
+            "它是余额为 0 的空钱包，没有资金损失。"
+            "请把环境变量 TOKENFISH_HOME 设为一个可写目录后重新运行 `setup`。"
+        )
+    else:
+        msg = (
+            "本地状态目录不可写，没有创建钱包（未向服务端发请求）。"
+            "请把环境变量 TOKENFISH_HOME 设为一个可写目录后重新运行 `setup`。"
+        )
+    return ToolError(
+        "local_state_unwritable",
+        msg,
+        False,
+        "设置环境变量 TOKENFISH_HOME 为一个可写目录后，重新运行 `python tokenfish_client.py setup`",
+        3,
+    )
+
+
+def err_channel_unavailable(channel: str) -> ToolError:
+    names = {"alipay": "支付宝", "wechat": "微信"}
+    other = "wechat" if channel == "alipay" else "alipay"
+    return ToolError(
+        "channel_unavailable",
+        f"{names.get(channel, channel)}充值通道暂时不可用，没有创建订单。可以改用{names[other]}（channel={other}）。",
+        False,
+        f"换成 channel={other} 重新调用 tokenfish.wallet.topup；"
+        f"如果两个通道都不可用，请用户到虾盘云官网 {OFFICIAL_SITE_URL} 充值",
+        3,
+    )
+
+
+def err_order_not_found(order_id: str) -> ToolError:
+    return ToolError(
+        "order_not_found",
+        f"没有找到订单 `{order_id}`。",
+        False,
+        "确认 order_id 来自 tokenfish.wallet.topup 的返回值（原样使用，不要改动）",
+        2,
+    )
 
 
 def err_unknown_task(task_id: str) -> ToolError:
@@ -356,10 +455,12 @@ def _tighten_permissions(path: Path) -> None:
         print(f"警告：收紧凭据文件权限失败：{exc}", file=sys.stderr)
 
 
-def save_credentials(key: str) -> Path:
+def save_credentials(key: str, wallet_id: Optional[str] = None) -> Path:
     """Saves the key into the resolved writable state dir (normally
-    ~/.tokenfish). Returns the file path; raises OSError if no state dir is
-    writable."""
+    ~/.tokenfish), plus the wallet id when `setup` created the wallet
+    ({"key": ..., "wallet_id": ...}; readers only need "key", so files without
+    wallet_id stay valid). Returns the file path; raises OSError if no state dir
+    is writable."""
     base = state_dir()
     if base is None:
         raise OSError("no writable state dir")
@@ -372,7 +473,10 @@ def save_credentials(key: str) -> Path:
     fd, tmp_name = tempfile.mkstemp(prefix=".credentials-", suffix=".tmp", dir=str(base))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump({"key": key}, fh)
+            record = {"key": key}
+            if wallet_id:
+                record["wallet_id"] = wallet_id
+            json.dump(record, fh)
         os.replace(tmp_name, path)
     finally:
         if os.path.exists(tmp_name):
@@ -555,20 +659,23 @@ def _is_not_sent_connect_error(reason: BaseException) -> bool:
 def http_request(
     method: str,
     path: str,
-    key: str,
+    key: Optional[str],
     payload: Optional[dict] = None,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> dict:
     """Raises ApiHttpError (server answered with a non-2xx status),
     ApiTransientError (no response; see `maybe_sent`) or ApiBadResponse (2xx
-    but unreadable body). Never includes the key in any raised message."""
+    but unreadable body). Never includes the key in any raised message.
+    `key=None` sends no Authorization header (public endpoints: /device/bind,
+    /recharge/*)."""
     url = api_base() + path
     data = None
     headers = {
-        "Authorization": f"Bearer {key}",
         "User-Agent": build_user_agent(),
         "Accept": "application/json",
     }
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -613,8 +720,8 @@ def http_request(
     return parsed
 
 
-def fetch_wallet_raw(key: str) -> dict:
-    resp = http_request("GET", "/api/usage/token/", key)
+def fetch_wallet_raw(key: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
+    resp = http_request("GET", "/api/usage/token/", key, timeout=timeout)
     return resp.get("data", {}) or {}
 
 
@@ -1043,7 +1150,10 @@ def tool_wallet_get(args: dict, key: str) -> dict:
     return {
         "balance_cny": round(total_available / QUOTA_PER_CNY, 2),
         "total_available_quota": total_available,
-        "topup": "运行 `python scripts/tokenfish_client.py topup` 在浏览器充值",
+        "topup": (
+            "余额不足或想充值时：问用户充多少元（1 到 500 的整数）和支付宝/微信，"
+            "调用 tokenfish.wallet.topup 拿付款链接，用户付款后用 tokenfish.wallet.topup_status 查到账"
+        ),
     }
 
 
@@ -1193,7 +1303,7 @@ def _finish_submit(client_request_id: str, provider: str, ahash: str, task_objec
     return task_object
 
 
-def tool_music_generate(args: dict, key: str) -> dict:
+def _music_generate(args: dict, key: str) -> dict:
     clean = validate_music_args(args)
     crid = clean["client_request_id"]
     ahash = args_hash(clean)
@@ -1277,7 +1387,7 @@ def _save_images(resp: dict, client_request_id: str) -> tuple:
     return images, warnings
 
 
-def tool_images_generate(args: dict, key: str) -> dict:
+def _images_generate(args: dict, key: str) -> dict:
     clean = validate_images_args(args)
     crid = clean["client_request_id"]
     ahash = args_hash(clean)
@@ -1354,7 +1464,7 @@ def _refresh_task(record: dict, key: str) -> dict:
     return task_object
 
 
-def tool_tasks_get(args: dict, key: str) -> dict:
+def _tasks_get(args: dict, key: str) -> dict:
     if not isinstance(args, dict):
         raise err_invalid_arguments("args", "必须是 JSON 对象")
     task_id = args.get("task_id")
@@ -1388,6 +1498,245 @@ def tool_tasks_list(args: dict, key: str) -> dict:
             for r in records
         ]
     }
+
+
+# --------------------------------------------------------------------------
+# v0.2: delivery links on successful paid results
+#
+# Printed by the client itself (not left to the AI to compose): a `play_url`
+# per clip / image, top-level `links`, `balance_after_cny` and `topup_hint`.
+# Everything here runs AFTER the result is final and is copied, never stored in
+# the local task store; any failure is swallowed so it cannot turn a charged,
+# successful result into an error (see SPEC.md "附：防重复扣费").
+# --------------------------------------------------------------------------
+
+
+def _is_http_url(value: Any) -> bool:
+    return isinstance(value, str) and value.lower().startswith(("http://", "https://"))
+
+
+def _fragment_url(page: str, params: dict) -> str:
+    """URL of a static page whose data rides in the fragment (browsers never
+    send it to the server). Callers must never put the API key in `params`."""
+    return f"{SITE_ORIGIN}/{page}#{urllib.parse.urlencode(params)}"
+
+
+def _play_url(kind: str, media_url: str, title: Any = None, duration: Any = None) -> str:
+    if kind == "img":
+        return _fragment_url("play.html", {"img": media_url})
+    return _fragment_url("play.html", {"src": media_url, "title": title or "", "dur": duration or ""})
+
+
+def _try_wallet_balance_cny(key: str) -> Optional[float]:
+    """Best-effort balance in CNY; None on ANY failure (never raises)."""
+    try:
+        wallet = fetch_wallet_raw(key, timeout=WALLET_FETCH_TIMEOUT)
+        total = wallet.get("total_available")
+        if isinstance(total, bool) or not isinstance(total, (int, float)):
+            return None
+        return round(total / QUOTA_PER_CNY, 2)
+    except Exception:
+        return None
+
+
+def _topup_hint(balance_cny: Optional[float]) -> str:
+    how = "需要充值时，直接告诉 AI「充值 N 元」（例如「充值 10 元」），AI 会把付款链接发给你。"
+    if balance_cny is None:
+        return how
+    return f"当前余额 ¥{balance_cny:.2f}。{how}"
+
+
+def _with_delivery_links(task_object: Any, key: str) -> Any:
+    """For a task object in the terminal `succeeded` state, returns a COPY with
+    `play_url` on every clip / image that has an http(s) URL, plus top-level
+    `links`, `balance_after_cny` (omitted if the wallet lookup fails) and
+    `topup_hint`. Anything else (queued / running / failed / not a dict) is
+    returned untouched. Never raises."""
+    try:
+        if not isinstance(task_object, dict) or task_object.get("status") != "succeeded":
+            return task_object
+        out = dict(task_object)
+        if isinstance(task_object.get("clips"), list):
+            clips = []
+            for clip in task_object["clips"]:
+                if isinstance(clip, dict):
+                    clip = dict(clip)
+                    if _is_http_url(clip.get("audio_url")):
+                        clip["play_url"] = _play_url(
+                            "src", clip["audio_url"], clip.get("title"), clip.get("duration_seconds")
+                        )
+                clips.append(clip)
+            out["clips"] = clips
+        if isinstance(task_object.get("images"), list):
+            images = []
+            for image in task_object["images"]:
+                if isinstance(image, dict):
+                    image = dict(image)
+                    if _is_http_url(image.get("url")):
+                        image["play_url"] = _play_url("img", image["url"])
+                images.append(image)
+            out["images"] = images
+        out["links"] = {"site": OFFICIAL_SITE_URL, "tokenfish": SITE_ORIGIN}
+        balance = _try_wallet_balance_cny(key)
+        if balance is not None:
+            out["balance_after_cny"] = balance
+        out["topup_hint"] = _topup_hint(balance)
+        return out
+    except Exception:
+        return task_object
+
+
+def tool_music_generate(args: dict, key: str) -> dict:
+    return _with_delivery_links(_music_generate(args, key), key)
+
+
+def tool_images_generate(args: dict, key: str) -> dict:
+    return _with_delivery_links(_images_generate(args, key), key)
+
+
+def tool_tasks_get(args: dict, key: str) -> dict:
+    return _with_delivery_links(_tasks_get(args, key), key)
+
+
+# --------------------------------------------------------------------------
+# v0.2: wallet top-up tools (never billed; the order is only paid when the
+# user pays it themselves, so every failure here is safe to retry)
+# --------------------------------------------------------------------------
+
+
+def validate_topup_args(args: dict) -> dict:
+    if not isinstance(args, dict):
+        raise err_invalid_arguments("args", "必须是 JSON 对象")
+
+    amount = args.get("amount")
+    if amount is None:
+        raise err_invalid_arguments("amount", "缺少必填参数")
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+        raise err_invalid_arguments("amount", "必须是数字（单位：元）")
+    if not (TOPUP_AMOUNT_MIN <= amount <= TOPUP_AMOUNT_MAX):  # also rejects NaN / inf
+        raise err_invalid_arguments(
+            "amount", f"取值范围必须是 {TOPUP_AMOUNT_MIN}..{TOPUP_AMOUNT_MAX} 的整数（单位：元）"
+        )
+    # Whole yuan only: the backend turns the amount into fen with int64(amount*100),
+    # which truncates fractional yuan (e.g. 1.15 -> 114 fen).
+    if isinstance(amount, float):
+        if not amount.is_integer():
+            raise err_invalid_arguments("amount", "必须是整数元，不支持小数")
+        amount = int(amount)
+
+    channel = args.get("channel")
+    if channel is None:
+        channel = "alipay"
+    if channel not in TOPUP_CHANNELS:
+        raise err_invalid_arguments("channel", f"必须是以下之一：{', '.join(TOPUP_CHANNELS)}（默认 alipay）")
+
+    return {"amount": amount, "channel": channel}
+
+
+def _normalize_topup_error(exc: Exception, channel: str) -> ToolError:
+    """Maps the real pay-server answers of POST /recharge/create (handler.go
+    CreateOrder / createAlipayOrder / createWechatOrder)."""
+    if isinstance(exc, ApiHttpError):
+        body = exc.body if isinstance(exc.body, dict) else {}
+        err = body.get("error")
+        err_text = err if isinstance(err, str) else ""
+        message = body.get("message") if isinstance(body.get("message"), str) else ""
+        if exc.status == 429:
+            return err_rate_limited_free()
+        if exc.status == 400:
+            if "not configured" in err_text:  # "alipay not configured" / "wechat pay not configured"
+                return err_channel_unavailable(channel)
+            if err_text == "token provision failed" or "Key 建档失败" in message:
+                return err_transient_free("Key 建档失败，暂不能发起支付")
+            if "amount" in err_text:
+                return err_invalid_arguments("amount", "必须是 1..500 的整数元")
+            return err_invalid_arguments("amount/channel", "服务端认为请求无效（invalid request）")
+        return err_transient_free(f"HTTP {exc.status}")
+    if isinstance(exc, (ApiTransientError, ApiBadResponse)):
+        return err_transient_free(exc.detail)
+    return err_transient_free(type(exc).__name__)
+
+
+def _build_pay_link(channel: str, resp: dict, order_id: str, amount: Any, key: str) -> str:
+    """alipay -> the gateway's payUrl as-is; wechat -> our static pay page (it
+    draws the QR from the weixin:// code URL carried in the fragment). The key
+    is never part of any link we hand out."""
+    if channel == "alipay":
+        link = resp.get("payUrl")
+        if not _is_http_url(link):
+            raise err_transient_free("下单响应缺少 payUrl")
+    else:
+        code_url = resp.get("codeUrl")
+        if not (isinstance(code_url, str) and code_url.startswith("weixin://")):
+            raise err_transient_free("下单响应缺少 codeUrl")
+        link = _fragment_url("pay.html", {"wx": code_url, "amt": amount, "order": order_id})
+    if key and key in link:
+        raise err_transient_free("下单响应异常")
+    return link
+
+
+def tool_wallet_topup(args: dict, key: str) -> dict:
+    clean = validate_topup_args(args)
+    amount, channel = clean["amount"], clean["channel"]
+    # The key travels ONLY in this POST body (no Authorization header, no URL).
+    body = {"apiKey": key, "amount": amount, "channel": channel}
+    try:
+        resp = http_request("POST", "/recharge/create", None, payload=body, timeout=DEFAULT_TIMEOUT)
+    except API_ERRORS as exc:
+        raise _normalize_topup_error(exc, channel) from None
+    order_id = resp.get("orderId")
+    if not isinstance(order_id, str) or not order_id:
+        raise err_transient_free("下单响应缺少 orderId")
+    pay_link = _build_pay_link(channel, resp, order_id, amount, key)
+    return {
+        "order_id": order_id,
+        "channel": channel,
+        "amount_cny": amount,
+        "pay_link": pay_link,
+        "next_step": (
+            "请用户打开 pay_link 完成付款"
+            + ("（支付宝：在浏览器里打开）" if channel == "alipay" else "（微信：打开页面后用微信扫码）")
+            + "；付完回到对话说「好了」，再调用 tokenfish.wallet.topup_status 查是否到账。"
+        ),
+    }
+
+
+def tool_wallet_topup_status(args: dict, key: str) -> dict:
+    if not isinstance(args, dict):
+        raise err_invalid_arguments("args", "必须是 JSON 对象")
+    order_id = args.get("order_id")
+    if not isinstance(order_id, str) or not order_id:
+        raise err_invalid_arguments("order_id", "缺少必填参数")
+    if len(order_id) > 200:
+        raise err_invalid_arguments("order_id", "长度不能超过 200 个字符")
+    path = "/recharge/status?order_id=" + urllib.parse.quote(order_id, safe="")
+    try:
+        resp = http_request("GET", path, None, timeout=DEFAULT_TIMEOUT)
+    except ApiHttpError as exc:
+        if exc.status == 404:
+            raise err_order_not_found(order_id) from None
+        if exc.status == 400:
+            raise err_invalid_arguments("order_id", "服务端认为订单号无效") from None
+        if exc.status == 429:
+            raise err_rate_limited_free() from None
+        raise err_transient_free(f"HTTP {exc.status}") from None
+    except (ApiTransientError, ApiBadResponse) as exc:
+        raise err_transient_free(exc.detail) from None
+    status = resp.get("status")  # pending / paid / recharged / failed (store.go Order.Status)
+    if not isinstance(status, str) or not status:
+        raise err_transient_free("订单状态响应缺少 status")
+    credited = status == "recharged"
+    echoed = resp.get("orderId")
+    result = {
+        "order_id": echoed if isinstance(echoed, str) and echoed else order_id,
+        "status": status,
+        "credited": credited,
+    }
+    if credited:
+        balance = _try_wallet_balance_cny(key)
+        if balance is not None:
+            result["balance_cny"] = balance
+    return result
 
 
 TOOLS = [
@@ -1471,6 +1820,38 @@ TOOLS = [
         "billed": False,
         "parameters": {"type": "object", "properties": {}, "required": []},
         "handler": tool_tasks_list,
+    },
+    {
+        "name": "tokenfish.wallet.topup",
+        "description": "给钱包充值（不扣费）：返回付款链接，用户自己付款；付完用 tokenfish.wallet.topup_status 查到账",
+        "billed": False,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "integer",
+                    "minimum": TOPUP_AMOUNT_MIN,
+                    "maximum": TOPUP_AMOUNT_MAX,
+                    "description": "充值金额（整数元），1..500，不支持小数",
+                },
+                "channel": {"type": "string", "enum": list(TOPUP_CHANNELS), "default": "alipay"},
+            },
+            "required": ["amount"],
+        },
+        "handler": tool_wallet_topup,
+    },
+    {
+        "name": "tokenfish.wallet.topup_status",
+        "description": "查询充值订单是否到账（不扣费）；到账后附带钱包余额",
+        "billed": False,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string", "description": "tokenfish.wallet.topup 返回的 order_id"},
+            },
+            "required": ["order_id"],
+        },
+        "handler": tool_wallet_topup_status,
     },
 ]
 
@@ -1575,6 +1956,102 @@ def cmd_login(key_file: str) -> tuple[dict, int]:
     }, 0
 
 
+def _already_configured_payload(key: str) -> dict:
+    base = state_dir()
+    return {
+        "status": "already_configured",
+        "key_masked": mask_key(key),
+        "state_dir": str(base) if base is not None else None,
+    }
+
+
+def _is_durable_location(saved_to: Path) -> bool:
+    """True if the credentials landed in ~/.tokenfish or $TOKENFISH_HOME (a
+    place the user chose or the normal home); False for the tmp / cwd fallbacks
+    a sandbox may wipe."""
+    parent = saved_to.parent
+    env = os.environ.get("TOKENFISH_HOME")
+    return parent == HOME_STATE_DIR or (bool(env) and parent == Path(env))
+
+
+# No trial credit: a new wallet is empty, so the very next thing is a top-up.
+SETUP_NEXT_STEP = (
+    "新钱包余额为 0，需要先充值才能生成。告诉 AI 要充多少元（例如「充值 10 元」，1 到 500 之间的整数元均可），"
+    "选支付宝或微信，就能马上拿到付款链接。"
+)
+
+
+def _backup_notice(saved_to: Path) -> str:
+    notice = (
+        f"这把 key 就是你的钱包：余额存放在它上面，谁拿到 key 谁就能花掉余额，丢了无法找回。"
+        f"请备份文件 {saved_to}（复制到安全的地方，不要发到聊天里）。"
+        "如果当前 AI 工具的沙箱可能清空这个位置（会话结束后文件丢失），"
+        "请把环境变量 TOKENFISH_HOME 设为一个持久的可写目录；"
+        "想在别的机器或别的工具里用同一个钱包，把 key 存成文件后运行 `login --key-file <path>` 导入。"
+    )
+    if not _is_durable_location(saved_to):
+        notice = "注意：本机 home 目录不可写，key 暂存在临时位置，会话结束后可能丢失，请马上备份。" + notice
+    return notice
+
+
+def cmd_setup() -> tuple[dict, int]:
+    """Open a new, empty wallet (POST /device/bind) when NO credentials exist
+    anywhere (incl. ~/.uking/device.json). Never replaces an existing key."""
+    key = load_credentials()
+    if key:
+        return _already_configured_payload(key), 0
+    if state_dir() is None:
+        # Nowhere to keep a key: don't create a wallet we could never use.
+        e = err_setup_unwritable(wallet_created=False)
+        return e.to_payload(), e.exit_code
+    # Concurrency guard: another process / AI tool may have just finished its own setup.
+    key = load_credentials()
+    if key:
+        return _already_configured_payload(key), 0
+
+    body = {
+        "platform": detect_platform(),
+        "channel": f"tokenfish-{find_package_slug(Path(__file__).resolve())}",
+    }
+    try:
+        resp = http_request("POST", "/device/bind", None, payload=body, timeout=DEFAULT_TIMEOUT)
+    except ApiHttpError as exc:
+        e = err_setup_rate_limited() if exc.status == 429 else err_setup_transient(f"HTTP {exc.status}")
+        return e.to_payload(), e.exit_code
+    except (ApiTransientError, ApiBadResponse) as exc:
+        e = err_setup_transient(exc.detail)
+        return e.to_payload(), e.exit_code
+
+    new_key = resp.get("apiKey")
+    if not isinstance(new_key, str) or not new_key.strip():
+        e = err_setup_transient("响应缺少 apiKey")
+        return e.to_payload(), e.exit_code
+    new_key = new_key.strip()
+    wallet_id = resp.get("walletId") if isinstance(resp.get("walletId"), str) and resp.get("walletId") else None
+
+    # Credentials may have appeared while the request was in flight: never overwrite
+    # them (the fresh wallet is empty, an existing one may hold money).
+    other = load_credentials()
+    if other:
+        return _already_configured_payload(other), 0
+
+    try:
+        saved_to = save_credentials(new_key, wallet_id)
+    except OSError:
+        e = err_setup_unwritable(wallet_created=True)
+        return e.to_payload(), e.exit_code
+
+    return {
+        "status": "created",
+        "wallet_id": wallet_id,
+        "key_masked": mask_key(new_key),
+        "saved_to": str(saved_to),
+        "balance_cny": _round_cny(resp.get("balanceTokens")),
+        "backup_notice": _backup_notice(saved_to),
+        "next_step": SETUP_NEXT_STEP,
+    }, 0
+
+
 def cmd_whoami() -> tuple[dict, int]:
     key = load_credentials()
     if not key:
@@ -1640,6 +2117,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("verify", help="读余额验证凭据，不扣费")
     sub.add_parser("tools", help="打印工具清单")
+    sub.add_parser("setup", help="没有任何凭据时，免注册开一个新钱包（已有凭据则不动）")
 
     call_parser = sub.add_parser("call", help="调用一个工具，参数 JSON 从 stdin 读取")
     call_parser.add_argument("tool", help="工具名，如 tokenfish.wallet.get")
@@ -1648,7 +2126,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     login_parser.add_argument("--key-file", required=True, help="包含 key 的文件路径")
 
     sub.add_parser("whoami", help="显示打码后的 key 和余额")
-    sub.add_parser("topup", help="打开充值页并把 key 复制到剪贴板")
+    sub.add_parser(
+        "topup",
+        help="在本机浏览器打开充值页（桌面环境用）",
+        description="在本机浏览器打开充值页（桌面环境用）；会把 key 复制到剪贴板方便粘贴。AI 对话里充值请用 tokenfish.wallet.topup 工具。",
+    )
 
     return parser
 
@@ -1668,6 +2150,8 @@ def main(argv: Optional[list] = None) -> int:
         payload, code = cmd_login(ns.key_file)
     elif ns.command == "whoami":
         payload, code = cmd_whoami()
+    elif ns.command == "setup":
+        payload, code = cmd_setup()
     elif ns.command == "topup":
         payload, code = cmd_topup()
     else:  # pragma: no cover
