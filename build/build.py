@@ -15,6 +15,11 @@ combination, this script:
      directly -- but ONLY if site/ already exists in the working tree.
      site/ is owned by a different branch/agent; this script must never
      create that top-level directory itself.
+  5. When site/ exists, also copies every channel x locale zip's bytes
+     (the same bytes already written under dist/, never re-zipped) into
+     site/dist/<slug>/<channel>/<locale>/<version>/<slug>-<version>.zip so
+     the /dist/... download URLs referenced by install.json/install.md
+     actually resolve when site/ is served as the web root.
 
 Stdlib only. Run twice with no source changes in between to confirm the
 sha256 values are identical (SPEC.md §6 check 2).
@@ -119,6 +124,7 @@ def build_package(slug: str) -> dict:
     display_name = manifest.get("display_name", slug)
 
     per_channel = {}
+    zip_bytes_by_channel = {}
     for channel, locale in CHANNELS:
         zip_bytes = build_zip_bytes(slug, channel, locale, manifest)
         sha256 = hashlib.sha256(zip_bytes).hexdigest()
@@ -136,6 +142,7 @@ def build_package(slug: str) -> dict:
             "archive": archive_rel,
             "archive_sha256": sha256,
         }
+        zip_bytes_by_channel[(channel, locale)] = zip_bytes
 
     primary = per_channel[PRIMARY_CHANNEL]
     install_json_text = json.dumps(primary, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -163,16 +170,31 @@ def build_package(slug: str) -> dict:
     return {
         "slug": slug,
         "per_channel": per_channel,
+        "zip_bytes_by_channel": zip_bytes_by_channel,
         "install_json_text": install_json_text,
         "install_md_text": install_md_text,
     }
 
 
-def mirror_into_site(slug: str, install_json_text: str, install_md_text: str, is_default_package: bool) -> None:
+def mirror_into_site(
+    slug: str,
+    install_json_text: str,
+    install_md_text: str,
+    is_default_package: bool,
+    per_channel: dict,
+    zip_bytes_by_channel: dict,
+) -> list[str]:
     """Never creates site/ itself -- only writes into it if it already
-    exists (site/ is owned by a different branch/agent)."""
+    exists (site/ is owned by a different branch/agent).
+
+    Also copies every channel's zip bytes to
+    site/<archive_rel> (the same bytes already written to DIST_DIR --
+    never re-zipped, so this stays byte-deterministic) so the /dist/...
+    download URLs referenced by install.json/install.md resolve when
+    site/ is served as the web root. Returns the list of site-relative
+    archive paths written (empty if site/ doesn't exist)."""
     if not SITE_DIR.is_dir():
-        return
+        return []
     pkg_site_dir = SITE_DIR / "skills" / slug
     pkg_site_dir.mkdir(parents=True, exist_ok=True)
     (pkg_site_dir / "install.json").write_text(install_json_text, encoding="utf-8")
@@ -180,6 +202,15 @@ def mirror_into_site(slug: str, install_json_text: str, install_md_text: str, is
     if is_default_package:
         (SITE_DIR / "install.json").write_text(install_json_text, encoding="utf-8")
         (SITE_DIR / "install.md").write_text(install_md_text, encoding="utf-8")
+
+    written: list[str] = []
+    for key, info in per_channel.items():
+        archive_rel = info["archive"]
+        site_archive_path = SITE_DIR / archive_rel.lstrip("/")
+        site_archive_path.parent.mkdir(parents=True, exist_ok=True)
+        site_archive_path.write_bytes(zip_bytes_by_channel[key])
+        written.append(archive_rel)
+    return written
 
 
 def main() -> int:
@@ -189,14 +220,18 @@ def main() -> int:
         return 1
 
     results = []
+    site_archives_written: list[str] = []
     for slug in packages:
         result = build_package(slug)
-        mirror_into_site(
+        written = mirror_into_site(
             slug,
             result["install_json_text"],
             result["install_md_text"],
             is_default_package=(slug == DEFAULT_PACKAGE),
+            per_channel=result["per_channel"],
+            zip_bytes_by_channel=result["zip_bytes_by_channel"],
         )
+        site_archives_written.extend(written)
         results.append(result)
 
     report = {
@@ -208,6 +243,7 @@ def main() -> int:
             for r in results
         ],
         "site_dir_existed": SITE_DIR.is_dir(),
+        "site_archives_written": site_archives_written,
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0

@@ -12,13 +12,27 @@ resolves everything else relative to the page's own path, strips any
 query string / fragment, and issues a real HTTP GET against the running
 server. Prints one line per checked link and a final PASS/FAIL summary.
 
+Against the same running server, this script also checks the actual
+download artifacts referenced from install.json/install.md files under
+site/ (recursively), since the HTML href/src walk above never looks
+inside those:
+  a. For every install.json under site/: GETs its "archive" path,
+     requires HTTP 200, and requires the sha256 of the response body to
+     equal the "archive_sha256" field recorded in that install.json.
+  b. For every install.md under site/: finds lines that, after stripping
+     whitespace, match `^/dist/\\S+\\.zip$`, and GETs each, requiring
+     HTTP 200.
+
 This script only reports results; it does not decide "the site is done".
 """
 
 from __future__ import annotations
 
+import hashlib
 import http.client
+import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -53,6 +67,26 @@ def find_html_files(root: str) -> list[str]:
             if name.endswith(".html"):
                 out.append(os.path.join(dirpath, name))
     return sorted(out)
+
+
+def find_files_named(root: str, filename: str) -> list[str]:
+    """All paths under `root` (recursive) whose basename is exactly `filename`."""
+    out = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        if filename in filenames:
+            out.append(os.path.join(dirpath, filename))
+    return sorted(out)
+
+
+ZIP_LINE_RE = re.compile(r"^/dist/\S+\.zip$")
+
+
+def find_zip_lines(md_path: str) -> list[str]:
+    """Lines in an install.md that, after stripping whitespace, are a
+    bare site-root-relative zip download path (SPEC.md §5 download block)."""
+    with open(md_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    return [line.strip() for line in lines if ZIP_LINE_RE.match(line.strip())]
 
 
 def extract_links(html_path: str) -> list[str]:
@@ -124,16 +158,22 @@ def wait_for_server(port: int, timeout: float = 5.0) -> None:
     raise RuntimeError("server did not start in time")
 
 
-def check_url(port: int, url_path: str) -> int:
+def fetch_url(port: int, url_path: str) -> tuple[int, bytes]:
+    """GET `url_path` from the running server; return (status, body)."""
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
         quoted = urllib.parse.quote(url_path)
         conn.request("GET", quoted)
         resp = conn.getresponse()
-        resp.read()
-        return resp.status
+        body = resp.read()
+        return resp.status, body
     finally:
         conn.close()
+
+
+def check_url(port: int, url_path: str) -> int:
+    status, _body = fetch_url(port, url_path)
+    return status
 
 
 def main() -> int:
@@ -175,6 +215,49 @@ def main() -> int:
                     failures.append((rel_page, link, url_path, f"HTTP {status}"))
                 else:
                     print(f"OK    {rel_page} -> {link} (resolved {url_path}): HTTP {status}")
+
+        install_json_files = find_files_named(SITE_DIR, "install.json")
+        for json_path in install_json_files:
+            rel_json = os.path.relpath(json_path, SITE_DIR).replace(os.sep, "/")
+            with open(json_path, "r", encoding="utf-8") as f:
+                install_data = json.load(f)
+            archive = install_data["archive"]
+            expected_sha256 = install_data["archive_sha256"]
+            total += 1
+            try:
+                status, body = fetch_url(port, archive)
+            except Exception as exc:  # noqa: BLE001
+                print(f"ERROR {rel_json} -> {archive}: {exc}")
+                failures.append((rel_json, archive, archive, str(exc)))
+                continue
+            if status >= 400:
+                print(f"FAIL  {rel_json} -> {archive}: HTTP {status}")
+                failures.append((rel_json, archive, archive, f"HTTP {status}"))
+                continue
+            actual_sha256 = hashlib.sha256(body).hexdigest()
+            if actual_sha256 != expected_sha256:
+                reason = f"sha256 mismatch: install.json says {expected_sha256}, archive is {actual_sha256}"
+                print(f"FAIL  {rel_json} -> {archive}: {reason}")
+                failures.append((rel_json, archive, archive, reason))
+            else:
+                print(f"OK    {rel_json} -> {archive}: HTTP {status}, sha256 matches")
+
+        install_md_files = find_files_named(SITE_DIR, "install.md")
+        for md_path in install_md_files:
+            rel_md = os.path.relpath(md_path, SITE_DIR).replace(os.sep, "/")
+            for zip_path in find_zip_lines(md_path):
+                total += 1
+                try:
+                    status = check_url(port, zip_path)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"ERROR {rel_md} -> {zip_path}: {exc}")
+                    failures.append((rel_md, zip_path, zip_path, str(exc)))
+                    continue
+                if status >= 400:
+                    print(f"FAIL  {rel_md} -> {zip_path}: HTTP {status}")
+                    failures.append((rel_md, zip_path, zip_path, f"HTTP {status}"))
+                else:
+                    print(f"OK    {rel_md} -> {zip_path}: HTTP {status}")
 
         print()
         print(f"Checked {total} relative link(s) across {len(html_files)} page(s).")
