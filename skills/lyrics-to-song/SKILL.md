@@ -31,6 +31,10 @@ description: 把歌词变成歌：歌词生成歌曲、歌词谱曲、中文歌�
 
 直接转述客户端返回的 `error.message` 和 `next_action`，不要自己编造充值步骤或重试建议。详见 `references/billing-and-errors.md`。
 
+- **`outcome_unknown`：绝对不要重试**（同一个或新的 `client_request_id` 都不行）。如实告诉用户这次请求可能已经提交并扣费，调用 `tokenfish.wallet.get` 展示余额，建议用户查看钱包流水核对。
+- **`local_state_unwritable`**：本次未提交、未扣费，让用户把环境变量 `TOKENFISH_HOME` 设为一个可写目录后再试。
+- 结果里带 `warning` 字段时同样不要重试：把 `warning` 的意思如实告诉用户（这次可能已经扣费）；结果里有 `task_id` 和 `provider` 时，调用 `tokenfish.tasks.get` 并带上这两个值取回作品，不要重新提交。
+
 ## 参考
 
 - `references/workflow.md`：两种模式的详细示例（含制作卡格式样例）。
