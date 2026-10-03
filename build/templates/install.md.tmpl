@@ -50,10 +50,20 @@
 python scripts/tokenfish_client.py verify
 ```
 
-如果提示没有凭据，告诉用户把虾盘云 / TokenFish 的 key 存到一个文件里，然后运行：
+如果提示没有凭据（`not_logged_in`），**先问用户**：开一个新的 TokenFish 钱包（免注册；新钱包余额为 0，需要先充值），还是导入已有的 key。
+
+用户同意开新钱包后运行：
+
+```
+python scripts/tokenfish_client.py setup
+```
+
+把返回的 `backup_notice`、`saved_to` 和 `next_step` 原样转述给用户（key 就是钱包，请备份那个文件；新钱包余额为 0，接着就问用户要充多少元）；输出里只有打码的 key，不要也不可能展示完整 key。
+
+用户已有 key 的话，让用户把 key 存到一个文件里，然后运行：
 
 ```
 python scripts/tokenfish_client.py login --key-file <path>
 ```
 
-不要让用户把 key 直接贴进对话。验证通过后即可开始使用，按次扣费，以钱包流水为准。
+不要让用户把 key 直接贴进对话。验证通过后即可开始使用，按次扣费，以钱包流水为准；余额不足时按 SKILL.md 的「充值」流程在对话里拿付款链接。

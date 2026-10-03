@@ -489,3 +489,92 @@ svg {
     font-size: 13px;
   }
 }
+
+/* 作品页 play.html / 支付页 pay.html */
+.tf-play {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 40px 0 16px;
+}
+
+.tf-play-title {
+  font-size: clamp(22px, 4vw, 28px);
+  margin: 0 0 6px;
+  word-break: break-word;
+}
+
+.tf-play-media {
+  margin: 18px 0 14px;
+}
+
+.tf-play-media audio {
+  display: block;
+  width: 100%;
+}
+
+.tf-play-media img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--tf-radius-md);
+  border: 1px solid var(--tf-border);
+}
+
+.tf-play-links {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.tf-play-links a {
+  color: var(--tf-accent);
+}
+
+.tf-play-links a:hover {
+  text-decoration: underline;
+}
+
+.tf-play-message {
+  color: var(--tf-warn);
+  font-size: 15px;
+}
+
+.tf-play p {
+  color: var(--tf-text-dim);
+}
+
+.tf-play .tf-cta-row {
+  margin-top: 22px;
+}
+
+.tf-qr {
+  display: flex;
+  justify-content: center;
+  margin: 18px 0;
+}
+
+.tf-qr img {
+  width: 272px;
+  height: 272px;
+  max-width: 100%;
+  background: #fff;
+  padding: 12px;
+  border-radius: var(--tf-radius-md);
+  image-rendering: pixelated;
+}
+
+.tf-kv {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--tf-text-dim);
+  word-break: break-all;
+}
+
+.tf-kv strong {
+  color: var(--tf-text);
+}
+
+.tf-amount {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--tf-accent);
+  margin: 4px 0 2px;
+}

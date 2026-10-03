@@ -29,9 +29,11 @@
 
 - 后端账本：虾盘云。额度单位 quota，¥1 = 500000 quota。
 - 按次扣费，具体金额以钱包流水为准，本站不写死价格。
-- 没有凭据（key）时，AI 会提示获取一把 TokenFish / 虾盘云 key，写入本地凭据文件后运行
-  `login --key-file <path>`；之后无需每次重新登录。
-- 余额不足时，本次调用不扣费，充值后可用同一个 client_request_id 原样重试。
+- 第一次使用、本机没有凭据时：AI 会先征得用户同意，再运行 `setup` 免注册开一个新钱包（新钱包余额为 0，没有体验金，需要先充值），
+  然后用户在对话里说「充值 N 元」（N 为 1 到 500 的整数）拿付款链接；已有 key 的用户用 `login --key-file <path>` 导入。之后无需每次重新登录。
+- 余额不足时，本次调用不扣费；在对话里说「充值 N 元」拿付款链接，到账后可用同一个 client_request_id 原样重试。
+- 作品页（生成结果里的 `play_url` 指向它：播放 / 预览 / 下载，数据放在 # 片段里）：https://tokenfish.u-claw.org.cn/play.html
+- 微信付款页（`tokenfish.wallet.topup` 选微信时的 `pay_link` 指向它，在浏览器里本地画二维码）：https://tokenfish.u-claw.org.cn/pay.html
 
 ## 开发者 API
 
