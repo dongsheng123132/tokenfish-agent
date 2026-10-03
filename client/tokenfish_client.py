@@ -66,7 +66,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
-CLIENT_VERSION = "0.2.0"
+CLIENT_VERSION = "0.2.1"
 
 DEFAULT_API_BASE = "https://api.u-claw.org.cn"
 TOPUP_URL = "https://api.u-claw.org.cn/recharge"

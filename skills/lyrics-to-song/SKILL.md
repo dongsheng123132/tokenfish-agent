@@ -48,7 +48,7 @@ description: 把歌词变成歌：歌词生成歌曲、歌词谱曲、中文歌�
    - `title`：标题（如果有）
    - `instrumental`：`false`（这个 Skill 默认是要人声成曲；如果用户中途改主意只要伴奏，改用全能包 `tokenfish` 的纯音乐路径）
    - `model`：`auto`（没有特殊要求就不要改）
-5. **轮询交付**：如果返回状态不是终态，用 `tokenfish.tasks.get` 按 `task_id` 轮询，直到 `succeeded` 或 `failed`；提醒用户上游出稿一般要 1-2 分钟到几分钟。交付时按 `clips` 顺序给出每首的 `play_url`（作品页，可在线试听和下载）、`audio_url`、`duration_seconds`，并**原样**给出 `links.site`、`charged_cny`（没有就说"以钱包流水为准"）、`balance_after_cny` 和 `topup_hint`（有就原样给）；`play_url` 是临时链接，约 24 小时内有效，提醒用户及时下载。
+5. **轮询交付**：如果返回状态不是终态，用 `tokenfish.tasks.get` 按 `task_id` 轮询，直到 `succeeded` 或 `failed`；提醒用户上游出稿一般要 1-2 分钟到几分钟。交付时按 `clips` 顺序给出每首的 `play_url`（作品页，可在线试听和下载）、`audio_url`、`duration_seconds`，并**原样**给出 `links.site`、`charged_cny`（没有就说"以钱包流水为准"）、`balance_after_cny` 和 `topup_hint`（有就原样给）；`play_url` 是临时链接，最短约 12 小时就会失效，提醒用户尽快下载。
 
 ## 余额不足 / 出错时
 
