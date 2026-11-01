@@ -3,8 +3,8 @@
 
 Single-file, Python 3.10+ standard-library-only client that lets an AI agent
 call TokenFish (backed by 虾盘云 / u-claw) capabilities: wallet balance,
-model listing, music generation (Suno / MiniMax), image generation, and task
-polling.
+model listing, music generation (Suno / MiniMax), image generation,
+text-to-speech, text-to-video (async submit + bounded poll), and task polling.
 
 Design constraints (see SPEC.md, authoritative):
   - stdout carries ONLY JSON. All diagnostics go to stderr.
@@ -66,7 +66,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
-CLIENT_VERSION = "0.2.0"
+CLIENT_VERSION = "0.3.0"
 
 DEFAULT_API_BASE = "https://api.u-claw.org.cn"
 TOPUP_URL = "https://api.u-claw.org.cn/recharge"
@@ -93,13 +93,41 @@ OUTPUT_DIR = Path("tokenfish-outputs")
 IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9\-_.]{12,128}$")
 
 MUSIC_MODELS = ("auto", "suno", "minimax")
-TASK_PROVIDERS = ("suno", "minimax")
+TASK_PROVIDERS = ("suno", "minimax", "video")
 IMAGE_QUALITIES = ("low", "medium", "high", "auto")
-CAPABILITIES = ("text_to_music", "text_to_image", "text_to_speech")
+CAPABILITIES = ("text_to_music", "text_to_image", "text_to_speech", "text_to_video")
 TTS_MODEL = "minimax-speech-2.8-turbo"
 TTS_VOICES = ("female-tianmei", "male-qn-qingse")
 TTS_DEFAULT_VOICE = "female-tianmei"
 TTS_MAX_BILLED_CHARS = 5000
+
+# Text-to-video (POST /v1/video/generations + GET /v1/video/generations/{id}).
+# Models come from the live /v1/models list; the first one is the cheapest and
+# therefore the default. Prices are only a hint for the craft card - the wallet
+# ledger is authoritative (see estimate_video_cost_cny).
+VIDEO_MODELS = (
+    "doubao-seedance-2-0-mini-260615",
+    "doubao-seedance-2-0-fast-260128",
+    "doubao-seedance-2-0-260128",
+    "wanx2.1-t2v-turbo",
+    "hy-video-1.5",
+)
+VIDEO_DEFAULT_MODEL = "doubao-seedance-2-0-mini-260615"
+VIDEO_RESOLUTIONS = ("480p", "720p", "1080p")
+VIDEO_DURATION_MIN = 5
+VIDEO_DURATION_MAX = 15
+VIDEO_POLL_INTERVAL = 5  # seconds between status polls (tests stub this)
+VIDEO_POLL_TIMEOUT = 180  # max seconds one call blocks before returning "running"
+VIDEO_DOWNLOAD_TIMEOUT = 120
+VIDEO_MIN_BYTES = 1024  # anything smaller is not a real MP4
+VIDEO_BASE_PRICE_CNY = {  # reference price for 5s / 480p, CNY
+    "doubao-seedance-2-0-mini-260615": 2.9,
+    "doubao-seedance-2-0-fast-260128": 4.9,
+    "doubao-seedance-2-0-260128": 6.9,
+}
+VIDEO_RESOLUTION_MULTIPLIER = {"480p": 1.0, "720p": 1.5, "1080p": 2.5}
+VIDEO_COST_NOTE = "估算，实扣以钱包流水为准"
+
 TOPUP_CHANNELS = ("alipay", "wechat")
 TOPUP_AMOUNT_MIN = 1
 TOPUP_AMOUNT_MAX = 500
@@ -315,6 +343,22 @@ def err_unknown_task(task_id: str) -> ToolError:
         "确认 task_id 来自本客户端此前的返回值；如果 task_id 确实有效但本地没有记录，"
         "请同时传 `provider`（取返回结果里的 provider 值）直接查询",
         2,
+    )
+
+
+def err_video_download_failed(task_id: Any, detail: str) -> ToolError:
+    """The video task itself succeeded (and may already be charged) but the
+    MP4 could not be downloaded / validated. Never resubmit: the caller can
+    call `tokenfish.tasks.get` with the same task_id to download it again."""
+    return ToolError(
+        "download_failed",
+        f"视频任务 `{task_id}` 已生成成功（可能已扣费），但下载校验未通过：{detail}。"
+        "本地残留文件已删除，没有重新提交任务。",
+        False,
+        "不要重新提交（会再次扣费）。稍后用 `tokenfish.tasks.get` 传这次的 `task_id`"
+        "（和 `provider`: \"video\"）重新下载；仍失败就用返回里的 `video_url` 在浏览器下载，"
+        "并以钱包流水核对。",
+        3,
     )
 
 
@@ -1083,6 +1127,41 @@ def validate_tts_args(args: dict) -> dict:
     return {"input": text, "voice": voice, "client_request_id": client_request_id}
 
 
+def validate_video_args(args: dict) -> dict:
+    if not isinstance(args, dict):
+        raise err_invalid_arguments("args", "必须是 JSON 对象")
+
+    prompt = _require_str(args, "prompt", max_len=2000, required=True)
+
+    duration = args.get("duration", VIDEO_DURATION_MIN)
+    if isinstance(duration, bool) or not isinstance(duration, int):
+        raise err_invalid_arguments("duration", "必须是整数（单位：秒）")
+    if not (VIDEO_DURATION_MIN <= duration <= VIDEO_DURATION_MAX):
+        raise err_invalid_arguments(
+            "duration", f"取值范围必须是 {VIDEO_DURATION_MIN}..{VIDEO_DURATION_MAX}（单位：秒，默认 {VIDEO_DURATION_MIN}）"
+        )
+
+    resolution = args.get("resolution", "480p")
+    if not isinstance(resolution, str) or resolution not in VIDEO_RESOLUTIONS:
+        raise err_invalid_arguments("resolution", f"必须是以下之一：{', '.join(VIDEO_RESOLUTIONS)}（默认 480p）")
+
+    model = args.get("model", VIDEO_DEFAULT_MODEL)
+    if not isinstance(model, str) or model not in VIDEO_MODELS:
+        raise err_invalid_arguments(
+            "model", f"必须是以下之一：{', '.join(VIDEO_MODELS)}（默认 {VIDEO_DEFAULT_MODEL}）"
+        )
+
+    client_request_id = _require_str(args, "client_request_id", max_len=200, required=True)
+
+    return {
+        "prompt": prompt,
+        "duration": duration,
+        "resolution": resolution,
+        "model": model,
+        "client_request_id": client_request_id,
+    }
+
+
 # --------------------------------------------------------------------------
 # Unified task object builders + status normalization
 # --------------------------------------------------------------------------
@@ -1178,6 +1257,64 @@ def build_suno_fetch_task_object(resp: dict, task_id: str, client_request_id: Op
     }
 
 
+def normalize_video_status(raw_status: Any) -> str:
+    """SUCCESS/SUCCEED/COMPLETE -> succeeded; FAIL/ERROR/CANCEL -> failed;
+    everything else (IN_PROGRESS / QUEUED / unknown) -> running."""
+    s = str(raw_status or "").upper()
+    if any(token in s for token in ("SUCCESS", "SUCCEED", "COMPLETE")):
+        return "succeeded"
+    if any(token in s for token in ("FAIL", "ERROR", "CANCEL")):
+        return "failed"
+    return "running"
+
+
+def estimate_video_cost_cny(model: str, duration: Any, resolution: str) -> Optional[float]:
+    """Rough reference price for the craft card (5s/480p base, scaled linearly
+    by duration, then by resolution). Models without a published reference
+    price return None; the real charge always comes from the wallet ledger."""
+    base = VIDEO_BASE_PRICE_CNY.get(model)
+    if base is None:
+        return None
+    try:
+        seconds = float(duration)
+    except (TypeError, ValueError):
+        return None
+    multiplier = VIDEO_RESOLUTION_MULTIPLIER.get(resolution, 1.0)
+    return round(base * (seconds / 5.0) * multiplier, 2)
+
+
+def build_video_task_object(
+    data: dict,
+    task_id: str,
+    client_request_id: Optional[str],
+    estimated_cost_cny: Optional[float] = None,
+) -> dict:
+    """Unified video task object. `data` is the (unwrapped) status payload;
+    a submit response with no status yet passes an empty dict."""
+    data = data if isinstance(data, dict) else {}
+    status = normalize_video_status(data.get("status")) if data else "running"
+    result_url = data.get("result_url")
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "provider": "video",
+        "status": status,
+        "file": None,
+        "video_url": result_url if isinstance(result_url, str) and result_url else None,
+        "clips": [],
+        "images": [],
+        "charged_cny": _round_cny(data.get("quota_charged")),
+        "links": None,
+        "balance_after_cny": None,
+        "topup_hint": None,
+        "estimated_cost_cny": estimated_cost_cny,
+        "cost_note": VIDEO_COST_NOTE,
+        "progress": data.get("progress") if data else None,
+        "fail_reason": data.get("fail_reason") if data else None,
+        "client_request_id": client_request_id,
+    }
+
+
 # --------------------------------------------------------------------------
 # Tool implementations
 # --------------------------------------------------------------------------
@@ -1204,7 +1341,8 @@ def tool_models_list(args: dict, key: str) -> dict:
     if capability not in CAPABILITIES:
         raise err_invalid_arguments(
             "capability",
-            f"缺少或非法，合法取值为：{', '.join(CAPABILITIES)}。说明：分别对应生成音乐、生成图片与文字转语音。",
+            f"缺少或非法，合法取值为：{', '.join(CAPABILITIES)}。"
+            "说明：分别对应生成音乐、生成图片、文字转语音与文生视频。",
         )
     if capability == "text_to_music":
         return {
@@ -1226,6 +1364,23 @@ def tool_models_list(args: dict, key: str) -> dict:
                     "price": "以实时扣费为准",
                 }
             ],
+        }
+    if capability == "text_to_video":
+        models = []
+        for model_id in VIDEO_MODELS:
+            entry = {"id": model_id, "price": "以实时扣费为准"}
+            reference = VIDEO_BASE_PRICE_CNY.get(model_id)
+            if reference is not None:
+                entry["reference_price_5s_480p_cny"] = reference
+            models.append(entry)
+        return {
+            "capability": capability,
+            "models": models,
+            "default": VIDEO_DEFAULT_MODEL,
+            "duration_seconds": f"{VIDEO_DURATION_MIN}..{VIDEO_DURATION_MAX}",
+            "resolutions": list(VIDEO_RESOLUTIONS),
+            "note": "价格以实时扣费为准；reference_price_5s_480p_cny 只是 5 秒 / 480p 的参考价，"
+            "实际按秒计费，时长与清晰度越高越贵，实扣以钱包流水为准。",
         }
     return {
         "capability": capability,
@@ -1606,6 +1761,255 @@ def _tts_generate(args: dict, key: str) -> dict:
     return task_object
 
 
+WARNING_VIDEO_RECORD_NOT_SAVED = (
+    "视频已提交生成，可能已扣费，但本地记录写入失败（状态目录不可写）。"
+    "请勿重试，也不要换新的 client_request_id 再次提交；"
+    "请用本次返回结果里的 `task_id` 和 `provider`（video）调用 `tokenfish.tasks.get`（两个参数都传）取回结果，"
+    "并以钱包流水核对。设置环境变量 TOKENFISH_HOME 为可写目录可避免此问题。"
+)
+
+
+def _video_status_payload(resp: dict) -> dict:
+    """Status payload lives under `data`; some gateways flatten it to the top
+    level - accept both."""
+    data = resp.get("data")
+    return data if isinstance(data, dict) else resp
+
+
+def _fetch_video_status(task_id: str, key: str) -> dict:
+    path = "/v1/video/generations/" + urllib.parse.quote(task_id, safe="")
+    resp = http_request("GET", path, key, timeout=DEFAULT_TIMEOUT)
+    return _video_status_payload(resp)
+
+
+def _submit_video(clean: dict, key: str, estimated_cost_cny: Optional[float]) -> dict:
+    payload = {
+        "model": clean["model"],
+        "prompt": clean["prompt"],
+        "duration": clean["duration"],
+        "resolution": clean["resolution"],
+    }
+    resp = http_request("POST", "/v1/video/generations", key, payload=payload, timeout=DEFAULT_TIMEOUT)
+    task_id = resp.get("task_id") or resp.get("id")
+    if not isinstance(task_id, str) or not task_id:
+        # 2xx but no task: the server accepted (and may have charged) the request.
+        raise ApiBadResponse("视频接口未返回 task_id")
+    return build_video_task_object({}, task_id, clean["client_request_id"], estimated_cost_cny)
+
+
+def _curl_download(url: str, key: str, path: Path) -> bool:
+    """Fallback downloader for TLS stacks that reject the CDN certificate
+    because of a revocation lookup (Windows schannel): `curl --ssl-no-revoke`.
+    The key travels through stdin (`--config -`), never on the command line."""
+    curl = shutil.which("curl")
+    if not curl:
+        return False
+    if any(ch in key for ch in '"\\\r\n') or any(ch in url for ch in '"\r\n'):
+        return False
+    config = (
+        'silent\nshow-error\nlocation\nfail\nssl-no-revoke\n'
+        f'max-time = {VIDEO_DOWNLOAD_TIMEOUT}\n'
+        'header = "Authorization: Bearer ' + key + '"\n'
+        'header = "Accept: video/mp4, video/*;q=0.9, */*;q=0.1"\n'
+        f'url = "{url}"\n'
+        f'output = "{path}"\n'
+    )
+    try:
+        proc = subprocess.run(
+            [curl, "--config", "-"],
+            input=config,
+            text=True,
+            capture_output=True,
+            timeout=VIDEO_DOWNLOAD_TIMEOUT + 10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _download_video_to_file(url: str, key: str, path: Path, task_id: str) -> str:
+    """Streams `url` into `path` (Bearer auth required). Returns the response
+    Content-Type. Raises `download_failed` (never retryable, never resubmits)."""
+    headers = {
+        "User-Agent": build_user_agent(),
+        "Authorization": f"Bearer {key}",
+        "Accept": "video/mp4, video/*;q=0.9, */*;q=0.1",
+    }
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        resp = urllib.request.urlopen(request, timeout=VIDEO_DOWNLOAD_TIMEOUT)
+    except urllib.error.HTTPError as exc:
+        raise err_video_download_failed(task_id, f"下载返回 HTTP {exc.code}") from None
+    except urllib.error.URLError as exc:
+        reason = exc.reason
+        if isinstance(reason, ssl.SSLCertVerificationError) and _curl_download(url, key, path):
+            return ""
+        detail = reason if isinstance(reason, str) and reason else type(reason).__name__
+        raise err_video_download_failed(task_id, f"下载失败：{detail}") from None
+    except (OSError, http.client.HTTPException) as exc:
+        raise err_video_download_failed(task_id, f"下载失败：{type(exc).__name__}") from None
+    content_type = ""
+    try:
+        with resp:
+            content_type = resp.headers.get("Content-Type", "") or ""
+            with open(path, "wb") as fh:
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+    except (OSError, http.client.HTTPException) as exc:
+        raise err_video_download_failed(task_id, f"下载中断：{type(exc).__name__}") from None
+    return content_type
+
+
+def _validate_video_file(path: Path, content_type: str, task_id: str) -> None:
+    """MP4 sanity gate: not JSON/HTML, >= 1 KB, and an `ftyp` box in the first
+    64 bytes. On failure the partial/poisoned file is removed first."""
+    def fail(reason: str) -> None:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise err_video_download_failed(task_id, reason)
+
+    lowered = (content_type or "").lower()
+    if "application/json" in lowered or "text/html" in lowered:
+        fail(f"服务器返回的是 {content_type} 而不是视频")
+    try:
+        size = path.stat().st_size
+    except OSError:
+        fail("下载文件不存在")
+    if size < VIDEO_MIN_BYTES:
+        fail(f"文件只有 {size} 字节，不像一个视频")
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(64)
+    except OSError:
+        fail("无法读取下载文件")
+    if b"ftyp" not in head:
+        fail("文件头里没有 MP4 的 ftyp 标记")
+
+
+def _download_video(result_url: Any, key: str, client_request_id: Optional[str], task_id: str) -> str:
+    """Download + validate the result MP4 into output_dir() as
+    `<safe_crid>.mp4`. Returns the local path. Never resubmits the task."""
+    if not _is_http_url(result_url):
+        raise err_video_download_failed(task_id, "结果地址不是 http(s) 链接")
+    try:
+        out_dir = output_dir()
+    except Exception:
+        out_dir = None
+    if out_dir is None:
+        raise err_video_download_failed(task_id, "输出目录不可写（可把 TOKENFISH_OUTPUT_DIR 设为可写目录）")
+    safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", str(client_request_id or task_id)) or "video"
+    out_path = out_dir / f"{safe_id}.mp4"
+    part_path = out_dir / f".{safe_id}.part"
+    try:
+        content_type = _download_video_to_file(result_url, key, part_path, task_id)
+        _validate_video_file(part_path, content_type, task_id)
+        os.replace(part_path, out_path)
+    except ToolError:
+        for leftover in (part_path,):
+            try:
+                leftover.unlink()
+            except OSError:
+                pass
+        raise
+    except OSError as exc:
+        try:
+            part_path.unlink()
+        except OSError:
+            pass
+        raise err_video_download_failed(task_id, f"无法写入本地文件：{type(exc).__name__}") from None
+    return str(out_path)
+
+
+def _poll_video_until_terminal(
+    task_id: str, key: str, client_request_id: Optional[str], estimated_cost_cny: Optional[float]
+) -> dict:
+    """Polls every VIDEO_POLL_INTERVAL seconds for at most VIDEO_POLL_TIMEOUT
+    seconds. A terminal status is returned (succeeded -> MP4 downloaded). If
+    no terminal status is reached this returns `status: "running"` with the
+    task_id and a warning - it never raises and NEVER resubmits."""
+    deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
+    last = None
+    poll_error = None
+    while True:
+        try:
+            data = _fetch_video_status(task_id, key)
+        except API_ERRORS as exc:
+            poll_error = normalize_api_error(exc, key).message
+            break
+        last = build_video_task_object(data, task_id, client_request_id, estimated_cost_cny)
+        if last["status"] == "succeeded":
+            last["file"] = _download_video(last["video_url"], key, client_request_id, task_id)
+            return last
+        if last["status"] == "failed":
+            return last
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(VIDEO_POLL_INTERVAL, remaining))
+
+    result = last or build_video_task_object({}, task_id, client_request_id, estimated_cost_cny)
+    result["status"] = "running"
+    if poll_error:
+        result["warning"] = (
+            f"查询视频状态时出错（{poll_error}），本次没有拿到终态，任务可能仍在生成。"
+            "不要重新提交（会再次扣费）；请稍后用 `tokenfish.tasks.get` 传这次的 `task_id` 和 `provider`（video）再查，"
+            "成功后客户端会自动下载 MP4。"
+        )
+    else:
+        result["warning"] = (
+            f"视频仍在生成中（本次最多等待约 {VIDEO_POLL_TIMEOUT} 秒），任务已提交、可能已扣费。"
+            "不要重新提交（会再次扣费）；请稍后用 `tokenfish.tasks.get` 传这次的 `task_id` 和 `provider`（video）再查，"
+            "成功后客户端会自动下载 MP4。"
+        )
+    return result
+
+
+def _video_generate(args: dict, key: str) -> dict:
+    clean = validate_video_args(args)
+    crid = clean["client_request_id"]
+    ahash = args_hash(clean)
+
+    existing = find_record_by_client_request_id(crid)
+    if existing is not None:
+        if existing.get("args_hash") != ahash:
+            raise err_idempotency_conflict(crid)
+        if _record_is_submitted(existing):
+            return _refresh_task(existing, key)
+        raise err_outcome_unknown("此前用同一个 client_request_id 发起的提交结果未确认，本次未重新提交")
+
+    estimated_cost_cny = estimate_video_cost_cny(clean["model"], clean["duration"], clean["resolution"])
+    try:
+        submitted = _paid_submit(
+            crid,
+            ahash,
+            "video",
+            lambda: _submit_video(clean, key, estimated_cost_cny),  # noqa: E731
+            key,
+        )
+    except _SafeFailure as failure:
+        raise failure.tool_error from None
+
+    # Submitted (and possibly charged): from here on nothing may look retryable.
+    task_id = submitted["task_id"]
+    try:
+        record_task(crid, "video", task_id, ahash, submitted)
+        record_warning = None
+    except Exception:
+        record_warning = WARNING_VIDEO_RECORD_NOT_SAVED
+
+    task_object = _poll_video_until_terminal(task_id, key, crid, estimated_cost_cny)
+    if record_warning:
+        task_object = dict(task_object)
+        task_object["warning"] = " ".join([w for w in (record_warning, task_object.get("warning")) if w])
+    update_task_snapshot(crid, task_object)
+    return task_object
+
+
 def _refresh_task(record: dict, key: str) -> dict:
     provider = record.get("provider")
     task_id = record.get("task_id")
@@ -1624,6 +2028,21 @@ def _refresh_task(record: dict, key: str) -> dict:
         except API_ERRORS as exc:
             raise normalize_api_error(exc, key) from None
         task_object = build_minimax_task_object(resp, crid)
+    elif provider == "video":
+        try:
+            data = _fetch_video_status(task_id, key)
+        except API_ERRORS as exc:
+            raise normalize_api_error(exc, key) from None
+        previous = record.get("last_task_object")
+        previous = previous if isinstance(previous, dict) else {}
+        estimate = previous.get("estimated_cost_cny")
+        task_object = build_video_task_object(data, task_id, crid, estimate)
+        if task_object["status"] == "succeeded":
+            cached_file = previous.get("file")
+            if isinstance(cached_file, str) and cached_file and Path(cached_file).is_file():
+                task_object["file"] = cached_file
+            else:
+                task_object["file"] = _download_video(task_object["video_url"], key, crid, task_id)
     else:
         return record.get("last_task_object", {})
     update_task_snapshot(crid, task_object)
@@ -1762,6 +2181,10 @@ def tool_images_generate(args: dict, key: str) -> dict:
 
 def tool_tts_generate(args: dict, key: str) -> dict:
     return _with_delivery_links(_tts_generate(args, key), key)
+
+
+def tool_video_generate(args: dict, key: str) -> dict:
+    return _with_delivery_links(_video_generate(args, key), key)
 
 
 def tool_tasks_get(args: dict, key: str) -> dict:
@@ -1983,6 +2406,37 @@ TOOLS = [
             "required": ["input", "client_request_id"],
         },
         "handler": tool_tts_generate,
+    },
+    {
+        "name": "tokenfish.video.generate",
+        "description": "一句话做视频（计费）：给画面描述，按秒计费，异步生成 MP4；最多等待约 180 秒，没出片就返回 running 和 task_id，用 tokenfish.tasks.get 再查",
+        "billed": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "maxLength": 2000, "description": "画面描述"},
+                "duration": {
+                    "type": "integer",
+                    "minimum": VIDEO_DURATION_MIN,
+                    "maximum": VIDEO_DURATION_MAX,
+                    "default": VIDEO_DURATION_MIN,
+                    "description": "时长（秒），5..15",
+                },
+                "resolution": {
+                    "type": "string",
+                    "enum": list(VIDEO_RESOLUTIONS),
+                    "default": "480p",
+                },
+                "model": {
+                    "type": "string",
+                    "enum": list(VIDEO_MODELS),
+                    "default": VIDEO_DEFAULT_MODEL,
+                },
+                "client_request_id": {"type": "string", "maxLength": 200},
+            },
+            "required": ["prompt", "client_request_id"],
+        },
+        "handler": tool_video_generate,
     },
     {
         "name": "tokenfish.tasks.get",

@@ -139,8 +139,16 @@ class TestModelsListValidation(unittest.TestCase):
 
     def test_invalid_capability_lists_valid_values(self):
         with self.assertRaises(self.tf.ToolError) as cm:
-            self.tf.tool_models_list({"capability": "text_to_video"}, "sk-whatever")
+            self.tf.tool_models_list({"capability": "text_to_3d"}, "sk-whatever")
         self.assertIn("text_to_music", cm.exception.message)
+
+    def test_valid_video_capability_lists_five_models(self):
+        result = self.tf.tool_models_list({"capability": "text_to_video"}, "sk-whatever")
+        self.assertEqual(result["capability"], "text_to_video")
+        ids = [m["id"] for m in result["models"]]
+        self.assertEqual(ids, list(self.tf.VIDEO_MODELS))
+        self.assertEqual(result["default"], self.tf.VIDEO_DEFAULT_MODEL)
+        self.assertTrue(all(m["price"] == "以实时扣费为准" for m in result["models"]))
 
     def test_valid_music_capability(self):
         result = self.tf.tool_models_list({"capability": "text_to_music"}, "sk-whatever")

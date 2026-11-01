@@ -1106,7 +1106,7 @@ class TestTasksGetProvider(_Base):
     def test_D_tools_schema_lists_provider_for_tasks_get(self):
         payload, code = self.tf.cmd_tools()
         schema = [t for t in payload if t["name"] == "tokenfish.tasks.get"][0]["parameters"]
-        self.assertEqual(schema["properties"]["provider"]["enum"], ["suno", "minimax"])
+        self.assertEqual(schema["properties"]["provider"]["enum"], ["suno", "minimax", "video"])
         self.assertEqual(schema["required"], ["task_id"])
 
 

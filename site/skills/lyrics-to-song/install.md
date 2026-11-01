@@ -18,7 +18,7 @@
 对下载到的 zip 计算 SHA-256，必须与 `install.json` 里的 `archive_sha256` 完全一致：
 
 ```
-2e1204f4bfebafec606f09888c1a2f052ca2d78514291159d0ef9b0870732b8f
+2c351cd8ca6db21b60af7c0e4b0648f3c0ccb8b96060710fa31f9063620970f5
 ```
 
 不一致就停止安装并告知用户，不要继续解压。

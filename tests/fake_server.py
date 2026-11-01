@@ -11,6 +11,7 @@ Usage:
 Failure injection (for the "never double-charge" tests):
     server.set_drop(method, path)              # read the request, close the connection WITHOUT answering
     server.set_raw(method, path, status, raw)  # answer with raw bytes (e.g. non-JSON 2xx body)
+    server.set_bytes(method, path, status, raw, content_type)  # raw bytes + explicit Content-Type
     server.set_slow(method, path, delay, status, body)  # answer only after `delay` seconds
     server.count(method, path)                 # how many requests of that kind arrived
 """
@@ -66,7 +67,7 @@ class _Handler(BaseHTTPRequestHandler):
             payload = json.dumps(response_body).encode("utf-8")
         try:
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", backend.content_type(method, path))
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -85,6 +86,7 @@ class FakeBackend:
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self._routes: dict[tuple[str, str], tuple[int, dict, Optional[Callable]]] = {}
+        self._content_types: dict[tuple[str, str], str] = {}
         self.requests: list[dict] = []
 
     def start(self) -> str:
@@ -106,15 +108,26 @@ class FakeBackend:
 
     def set_response(self, method: str, path: str, status: int, body: dict) -> None:
         self._routes[(method.upper(), path)] = (status, body, None)
+        self._content_types.pop((method.upper(), path), None)
 
     def set_handler(self, method: str, path: str, handler_fn: Callable) -> None:
         self._routes[(method.upper(), path)] = (0, {}, handler_fn)
+        self._content_types.pop((method.upper(), path), None)
 
     def set_drop(self, method: str, path: str) -> None:
         self.set_handler(method, path, lambda *_a: (None, None))
 
     def set_raw(self, method: str, path: str, status: int, raw: bytes) -> None:
         self._routes[(method.upper(), path)] = (status, raw, None)
+        self._content_types.pop((method.upper(), path), None)
+
+    def set_bytes(self, method: str, path: str, status: int, raw: bytes, content_type: str) -> None:
+        """Raw bytes with an explicit Content-Type (e.g. a fake MP4 download)."""
+        self._routes[(method.upper(), path)] = (status, raw, None)
+        self._content_types[(method.upper(), path)] = content_type
+
+    def content_type(self, method: str, path: str) -> str:
+        return self._content_types.get((method.upper(), path), "application/json")
 
     def set_slow(self, method: str, path: str, delay: float, status: int, body: dict) -> None:
         def slow(*_a):
