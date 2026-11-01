@@ -95,7 +95,11 @@ IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9\-_.]{12,128}$")
 MUSIC_MODELS = ("auto", "suno", "minimax")
 TASK_PROVIDERS = ("suno", "minimax")
 IMAGE_QUALITIES = ("low", "medium", "high", "auto")
-CAPABILITIES = ("text_to_music", "text_to_image")
+CAPABILITIES = ("text_to_music", "text_to_image", "text_to_speech")
+TTS_MODEL = "minimax-speech-2.8-turbo"
+TTS_VOICES = ("female-tianmei", "male-qn-qingse")
+TTS_DEFAULT_VOICE = "female-tianmei"
+TTS_MAX_BILLED_CHARS = 5000
 TOPUP_CHANNELS = ("alipay", "wechat")
 TOPUP_AMOUNT_MIN = 1
 TOPUP_AMOUNT_MAX = 500
@@ -662,17 +666,20 @@ def http_request(
     key: Optional[str],
     payload: Optional[dict] = None,
     timeout: int = DEFAULT_TIMEOUT,
-) -> dict:
+    as_bytes: bool = False,
+    accept: Optional[str] = None,
+) -> Any:
     """Raises ApiHttpError (server answered with a non-2xx status),
     ApiTransientError (no response; see `maybe_sent`) or ApiBadResponse (2xx
     but unreadable body). Never includes the key in any raised message.
     `key=None` sends no Authorization header (public endpoints: /device/bind,
-    /recharge/*)."""
+    /recharge/*). With `as_bytes=True` the raw 2xx body is returned as bytes
+    (for binary endpoints like TTS) instead of being parsed as JSON."""
     url = api_base() + path
     data = None
     headers = {
         "User-Agent": build_user_agent(),
-        "Accept": "application/json",
+        "Accept": accept if accept else "application/json",
     }
     if key:
         headers["Authorization"] = f"Bearer {key}"
@@ -709,6 +716,8 @@ def http_request(
             raw = resp.read()
     except Exception as exc:
         raise ApiBadResponse(f"响应读取中断：{type(exc).__name__}") from None
+    if as_bytes:
+        return raw
     if not raw:
         return {}
     try:
@@ -1041,6 +1050,39 @@ def validate_images_args(args: dict) -> dict:
     }
 
 
+_CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def _tts_billed_chars(text: str) -> int:
+    """TTS 计费字符数：汉字（CJK 统一表意文字及扩展/兼容表意文字）按 2，其余按 1。"""
+    total = 0
+    for ch in text:
+        total += 2 if _CJK_RE.search(ch) else 1
+    return total
+
+
+def validate_tts_args(args: dict) -> dict:
+    if not isinstance(args, dict):
+        raise err_invalid_arguments("args", "必须是 JSON 对象")
+
+    text = _require_str(args, "input", required=True)
+
+    voice = args.get("voice", TTS_DEFAULT_VOICE)
+    if not isinstance(voice, str) or voice not in TTS_VOICES:
+        raise err_invalid_arguments("voice", f"必须是以下之一：{', '.join(TTS_VOICES)}（默认 {TTS_DEFAULT_VOICE}）")
+
+    client_request_id = _require_str(args, "client_request_id", max_len=200, required=True)
+
+    billed = _tts_billed_chars(text)
+    if billed > TTS_MAX_BILLED_CHARS:
+        raise err_invalid_arguments(
+            "input",
+            f"计费字符数超过 {TTS_MAX_BILLED_CHARS}（汉字按 2、其他按 1 计，当前约 {billed}），请缩短文本后再试",
+        )
+
+    return {"input": text, "voice": voice, "client_request_id": client_request_id}
+
+
 # --------------------------------------------------------------------------
 # Unified task object builders + status normalization
 # --------------------------------------------------------------------------
@@ -1162,7 +1204,7 @@ def tool_models_list(args: dict, key: str) -> dict:
     if capability not in CAPABILITIES:
         raise err_invalid_arguments(
             "capability",
-            f"缺少或非法，合法取值为：{', '.join(CAPABILITIES)}。说明：分别对应生成音乐与生成图片。",
+            f"缺少或非法，合法取值为：{', '.join(CAPABILITIES)}。说明：分别对应生成音乐、生成图片与文字转语音。",
         )
     if capability == "text_to_music":
         return {
@@ -1175,11 +1217,21 @@ def tool_models_list(args: dict, key: str) -> dict:
                 }
             ],
         }
+    if capability == "text_to_image":
+        return {
+            "capability": capability,
+            "models": [
+                {
+                    "id": "gpt-image-2",
+                    "price": "以实时扣费为准",
+                }
+            ],
+        }
     return {
         "capability": capability,
         "models": [
             {
-                "id": "gpt-image-2",
+                "id": TTS_MODEL,
                 "price": "以实时扣费为准",
             }
         ],
@@ -1285,6 +1337,11 @@ WARNING_MUSIC_RECORD_NOT_SAVED = (
 )
 WARNING_IMAGES_RECORD_NOT_SAVED = (
     "图片已提交生成，可能已扣费，但本地记录写入失败（状态目录不可写）。"
+    "请勿重试，也不要换新的 client_request_id 再次提交；本次结果已随本次返回给出，请直接交付并以钱包流水核对。"
+    "设置环境变量 TOKENFISH_HOME 为可写目录可避免此问题。"
+)
+WARNING_TTS_RECORD_NOT_SAVED = (
+    "语音已生成，可能已扣费，但本地记录写入失败（状态目录不可写）。"
     "请勿重试，也不要换新的 client_request_id 再次提交；本次结果已随本次返回给出，请直接交付并以钱包流水核对。"
     "设置环境变量 TOKENFISH_HOME 为可写目录可避免此问题。"
 )
@@ -1440,6 +1497,115 @@ def _images_generate(args: dict, key: str) -> dict:
     return task_object
 
 
+def _save_tts_audio(mp3: bytes, client_request_id: str) -> tuple:
+    """Saves the MP3 bytes; never raises (the paid call already succeeded).
+    Returns (path, warning)."""
+    safe_id = re.sub(r"[^A-Za-z0-9._-]", "_", client_request_id)
+    try:
+        out_dir = output_dir()
+        if out_dir is None:
+            raise OSError("no writable output dir")
+        out_path = out_dir / f"{safe_id}.mp3"
+        out_path.write_bytes(mp3)
+        return str(out_path), None
+    except Exception:
+        return None, (
+            "语音已生成，可能已扣费，但 MP3 无法保存到本地（输出目录不可写）。"
+            "请勿重试（重试会再次扣费）；把环境变量 TOKENFISH_OUTPUT_DIR 设为可写目录可避免此问题。"
+        )
+
+
+def _describe_json_error(parsed: Any) -> str:
+    """Human-readable failure for a 2xx body that turned out to be JSON (an
+    error object) instead of MP3 bytes."""
+    if isinstance(parsed, dict):
+        err = parsed.get("error")
+        if isinstance(err, dict):
+            msg = err.get("message") or err.get("type")
+            if isinstance(msg, str) and msg:
+                return f"语音接口返回错误：{msg}"
+        if isinstance(err, str) and err:
+            return f"语音接口返回错误：{err}"
+        msg = parsed.get("message")
+        if isinstance(msg, str) and msg:
+            return f"语音接口返回错误：{msg}"
+    return "语音接口返回了非 MP3 的响应（JSON 错误体）"
+
+
+def _submit_tts(clean: dict, key: str) -> bytes:
+    payload = {
+        "model": TTS_MODEL,
+        "input": clean["input"],
+        "voice": clean["voice"],
+    }
+    raw = http_request(
+        "POST",
+        "/v1/audio/speech",
+        key,
+        payload=payload,
+        timeout=DEFAULT_TIMEOUT,
+        as_bytes=True,
+        accept="audio/mpeg, audio/mp3, application/json",
+    )
+    if not raw:
+        raise ApiBadResponse("语音接口返回了空响应（非 MP3）")
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return raw  # 不是 JSON → 视为 MP3 字节
+    # 2xx 但返回的是 JSON（错误体）而不是 MP3：当作失败。
+    raise ApiBadResponse(_describe_json_error(parsed))
+
+
+def _tts_generate(args: dict, key: str) -> dict:
+    clean = validate_tts_args(args)
+    crid = clean["client_request_id"]
+    ahash = args_hash(clean)
+
+    existing = find_record_by_client_request_id(crid)
+    if existing is not None:
+        if existing.get("args_hash") != ahash:
+            raise err_idempotency_conflict(crid)
+        if _record_is_submitted(existing):
+            return existing.get("last_task_object", {})
+        raise err_outcome_unknown("此前用同一个 client_request_id 发起的提交结果未确认，本次未重新提交")
+
+    try:
+        mp3 = _paid_submit(
+            crid,
+            ahash,
+            "tts",
+            lambda: _submit_tts(clean, key),  # noqa: E731
+            key,
+        )
+    except _SafeFailure as failure:
+        raise failure.tool_error from None
+
+    # The server accepted (and charged) the request: from here on nothing may raise.
+    file_path, warning = _save_tts_audio(mp3, crid)
+    task_id = f"tts-{crid}-{hashlib.sha256(ahash.encode()).hexdigest()[:8]}"
+    warnings = [w for w in [warning] if w]
+    task_object = {
+        "ok": True,
+        "task_id": task_id,
+        "provider": "tts",
+        "status": "succeeded",
+        "clips": [],
+        "images": [],
+        "file": file_path,
+        "charged_cny": None,
+        "client_request_id": crid,
+    }
+    if warnings:
+        task_object["warning"] = " ".join(warnings)
+    try:
+        record_task(crid, "tts", task_id, ahash, task_object)
+    except Exception:
+        task_object = dict(task_object)
+        task_object["warning"] = " ".join(warnings + [WARNING_TTS_RECORD_NOT_SAVED])
+    return task_object
+
+
 def _refresh_task(record: dict, key: str) -> dict:
     provider = record.get("provider")
     task_id = record.get("task_id")
@@ -1592,6 +1758,10 @@ def tool_music_generate(args: dict, key: str) -> dict:
 
 def tool_images_generate(args: dict, key: str) -> dict:
     return _with_delivery_links(_images_generate(args, key), key)
+
+
+def tool_tts_generate(args: dict, key: str) -> dict:
+    return _with_delivery_links(_tts_generate(args, key), key)
 
 
 def tool_tasks_get(args: dict, key: str) -> dict:
@@ -1795,6 +1965,24 @@ TOOLS = [
             "required": ["prompt", "client_request_id"],
         },
         "handler": tool_images_generate,
+    },
+    {
+        "name": "tokenfish.tts.generate",
+        "description": "把文字转成语音配音（计费）：一句话生成 MP3，可选女声/男声",
+        "billed": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "要合成的文本；计费字符数不超过 5000（汉字按 2、其他按 1 计）",
+                },
+                "voice": {"type": "string", "enum": list(TTS_VOICES), "default": TTS_DEFAULT_VOICE},
+                "client_request_id": {"type": "string", "maxLength": 200},
+            },
+            "required": ["input", "client_request_id"],
+        },
+        "handler": tool_tts_generate,
     },
     {
         "name": "tokenfish.tasks.get",
