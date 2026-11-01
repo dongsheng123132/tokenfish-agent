@@ -1,8 +1,8 @@
 {
-  "archive": "/dist/tokenfish/skillhub/zh-CN/0.2.0/tokenfish-0.2.0.zip",
-  "archive_sha256": "23a6630cdd51240324ee53a56cf54c3ed2edc1a54841eb3ac19713d8fc2201ea",
+  "archive": "/dist/tokenfish/skillhub/zh-CN/0.3.0/tokenfish-0.3.0.zip",
+  "archive_sha256": "22a9b1d5975eeb93068b0f7ed3f1acb2911e5bf280c7b849086be74a8184ddb1",
   "channel": "skillhub",
   "locale": "zh-CN",
   "package": "tokenfish",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

@@ -7,8 +7,8 @@
 从以下相对路径下载对应「渠道 × 语言」的 zip（v0 提供两个渠道，内容一致，任选其一）：
 
 ```
-/dist/tokenfish/skillhub/zh-CN/0.2.0/tokenfish-0.2.0.zip
-/dist/tokenfish/canonical/zh-CN/0.2.0/tokenfish-0.2.0.zip
+/dist/tokenfish/skillhub/zh-CN/0.3.0/tokenfish-0.3.0.zip
+/dist/tokenfish/canonical/zh-CN/0.3.0/tokenfish-0.3.0.zip
 ```
 
 本文件同目录的 `install.json` 记录了本页默认渠道对应的真实版本号与 `archive_sha256`，请以它为准，不要凭空拼版本号。
@@ -18,7 +18,7 @@
 对下载到的 zip 计算 SHA-256，必须与 `install.json` 里的 `archive_sha256` 完全一致：
 
 ```
-23a6630cdd51240324ee53a56cf54c3ed2edc1a54841eb3ac19713d8fc2201ea
+22a9b1d5975eeb93068b0f7ed3f1acb2911e5bf280c7b849086be74a8184ddb1
 ```
 
 不一致就停止安装并告知用户，不要继续解压。

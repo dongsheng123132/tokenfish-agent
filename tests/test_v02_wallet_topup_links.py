@@ -1023,14 +1023,14 @@ class TestStaticPages(unittest.TestCase):
         self.assertIn(SITE + "/play.html", text)
         self.assertIn(SITE + "/pay.html", text)
 
-    def test_P6_versions_are_0_2_0_and_site_origin_is_the_launch_origin(self):
+    def test_P6_versions_are_0_3_0_and_site_origin_is_the_launch_origin(self):
         tf = import_client_module()
-        self.assertEqual(tf.CLIENT_VERSION, "0.2.0")
+        self.assertEqual(tf.CLIENT_VERSION, "0.3.0")
         self.assertEqual(tf.SITE_ORIGIN, SITE)
         self.assertEqual(tf.OFFICIAL_SITE_URL, OFFICIAL)
-        for slug in ("tokenfish", "lyrics-to-song"):
-            manifest = json.loads(self.read(f"skills/{slug}/manifest.json"))
-            self.assertEqual(manifest["version"], "0.2.0")
+        # tokenfish 0.3.0 adds text-to-video; lyrics-to-song is untouched.
+        self.assertEqual(json.loads(self.read("skills/tokenfish/manifest.json"))["version"], "0.3.0")
+        self.assertEqual(json.loads(self.read("skills/lyrics-to-song/manifest.json"))["version"], "0.2.0")
 
     def test_P7_skill_docs_and_install_template_use_setup_and_keep_login_as_the_import_path(self):
         for rel in (
