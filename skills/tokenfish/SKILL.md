@@ -1,5 +1,11 @@
 ---
 name: tokenfish
+slug: tokenfish
+version: 0.2.0
+displayName: TokenFish
+summary: 在 AI 对话里一句话写歌、作图、配音，用虾盘云钱包按次扣费。
+tags: [music, image, tts, voice, 写歌, 作图, 配音]
+homepage: https://tokenfish.u-claw.org.cn
 description: 想在正在用的 AI 对话里直接写一首歌、配一段纯音乐、生成一张图或配一段语音（配音/旁白/文字转语音），不想跳去别的网站、不想另外开账号充值——用你已有的余额，一句话在对话里生成音乐、图片或语音，按次扣费。
 ---
 
