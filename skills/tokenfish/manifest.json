@@ -5,14 +5,14 @@
   "homepage": "https://tokenfish.u-claw.org.cn/skills/tokenfish",
   "localized": {
     "zh": {
-      "title": "TokenFish：在 AI 里写歌、作图",
-      "summary": "在对话里直接生成音乐或图片，用你已有的余额按次扣费，不用切换网站、不用另外开账号。",
-      "tags": ["写歌", "作曲", "作图", "AI 生成", "按次付费"]
+      "title": "TokenFish：在 AI 里写歌、作图、配音",
+      "summary": "在对话里直接生成音乐、图片或语音配音，用你已有的余额按次扣费，不用切换网站、不用另外开账号。",
+      "tags": ["写歌", "作曲", "作图", "配音", "语音合成", "文字转语音", "AI 生成", "按次付费"]
     },
     "en": {
-      "title": "TokenFish: Music & Images in Your AI Chat",
-      "summary": "Generate music or images right inside your conversation, billed from your existing wallet balance.",
-      "tags": ["music generation", "image generation", "ai agent", "pay per use"]
+      "title": "TokenFish: Music, Images & Voice in Your AI Chat",
+      "summary": "Generate music, images or voice-over speech right inside your conversation, billed from your existing wallet balance.",
+      "tags": ["music generation", "image generation", "text to speech", "voice synthesis", "voice-over", "ai agent", "pay per use"]
     }
   },
   "channel": null,

@@ -1,33 +1,41 @@
-<!--
-  占位文件 — 由 build/build.py 用 build/templates/install.md.tmpl 生成后会整体覆盖本文件
-  （build/ 由另一分支实现）。这里先让 skills/tokenfish/index.html 里的
-  「复制安装消息」按钮引用的 https://tokenfish.u-claw.org.cn/skills/tokenfish/install.md 能打开，
-  结构对齐 SPEC.md §4/§5。内容与站点根目录的 install.md 一致（同一个全能包）。
--->
+# 安装 TokenFish
 
-# 安装 TokenFish 全能包
-
-写给 AI 读：收到用户「安装 TokenFish 全能包」的请求后，按下面步骤自己完成。
+写给 AI 读：收到用户「安装 TokenFish」的请求后，按下面步骤自己完成，不要让用户手动操作。
 
 ## 1. 下载
 
+从以下相对路径下载对应「渠道 × 语言」的 zip（v0 提供两个渠道，内容一致，任选其一）：
+
 ```
-/dist/tokenfish/skillhub/zh-CN/<version>/tokenfish-<version>.zip
-/dist/tokenfish/canonical/zh-CN/<version>/tokenfish-<version>.zip
+/dist/tokenfish/skillhub/zh-CN/0.2.0/tokenfish-0.2.0.zip
+/dist/tokenfish/canonical/zh-CN/0.2.0/tokenfish-0.2.0.zip
 ```
 
-> 占位说明：真实 `<version>` 和对应的 `archive_sha256` 在同目录的 `install.json` 里，
-> 由 `build/build.py` 生成，不要凭空拼版本号。
+本文件同目录的 `install.json` 记录了本页默认渠道对应的真实版本号与 `archive_sha256`，请以它为准，不要凭空拼版本号。
 
 ## 2. 校验 SHA-256
 
-必须与 `install.json` 的 `archive_sha256` 一致，不一致就停止并告知用户。
+对下载到的 zip 计算 SHA-256，必须与 `install.json` 里的 `archive_sha256` 完全一致：
+
+```
+5b9e1448976712b2e181dc51abeaa335aee03511af349154071f52048bfb4007
+```
+
+不一致就停止安装并告知用户，不要继续解压。
 
 ## 3. 安全解压
 
-拒绝绝对路径、包含 `..` 的路径、反斜杠路径分隔符、符号链接、非预期顶层目录（顶层目录必须是 `tokenfish`）。
+解压前检查压缩包里的每一个条目，发现以下任意一种情况就拒绝解压并告知用户：
+
+- 绝对路径
+- 路径中包含 `..`（路径穿越）
+- 路径使用反斜杠 `\` 作为分隔符
+- 符号链接条目
+- 顶层目录不是 `tokenfish`
 
 ## 4. 安装到宿主目录
+
+把解压出的 `tokenfish/` 整个目录放进当前 AI 工具的技能目录：
 
 | AI 工具 | 技能目录 |
 |---|---|
@@ -35,7 +43,7 @@
 | Codex | `~/.codex/skills/` |
 | WorkBuddy | `~/.workbuddy/skills/` |
 | Cursor | `~/.cursor/skills/` |
-| 豆包工作 | 使用其自身技能目录 |
+| 豆包工作 | 使用其自身的技能目录 |
 
 ## 5. 验证凭据
 
@@ -43,7 +51,20 @@
 python scripts/tokenfish_client.py verify
 ```
 
-没有凭据文件时，提示用户把虾盘云 / TokenFish key 存到文件后运行
-`python scripts/tokenfish_client.py login --key-file <path>`，不要让用户把 key 贴进对话。
+如果提示没有凭据（`not_logged_in`），**先问用户**：开一个新的 TokenFish 钱包（免注册；新钱包余额为 0，需要先充值），还是导入已有的 key。
 
-之后即可写歌、作图，按次扣费，以钱包流水为准。
+用户同意开新钱包后运行：
+
+```
+python scripts/tokenfish_client.py setup
+```
+
+把返回的 `backup_notice`、`saved_to` 和 `next_step` 原样转述给用户（key 就是钱包，请备份那个文件；新钱包余额为 0，接着就问用户要充多少元）；输出里只有打码的 key，不要也不可能展示完整 key。
+
+用户已有 key 的话，让用户把 key 存到一个文件里，然后运行：
+
+```
+python scripts/tokenfish_client.py login --key-file <path>
+```
+
+不要让用户把 key 直接贴进对话。验证通过后即可开始使用，按次扣费，以钱包流水为准；余额不足时按 SKILL.md 的「充值」流程在对话里拿付款链接。
